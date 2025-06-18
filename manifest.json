@@ -1,0 +1,12 @@
+{
+    "display_name": "Prose Polisher (Regex + AI)",
+    "author": "@NemoVonNirgend & AI Collaboration",
+    "version": "3.0.0",
+    "description": "A comprehensive writing assistant. Fixes common 'slop' with an editable regex list and uses AI to automatically learn and generate new rules for repetitive phrases. Includes a full Regex Navigator.",
+    "requires": [],
+    "optional": [],
+    "js": "content.js",
+    "css": "styles.css",
+    "homePage": "https://github.com/NemoVonNirgend/NemoPresetExt",
+    "loading_order": 1000
+}

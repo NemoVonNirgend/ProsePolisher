@@ -1,0 +1,43 @@
+<div class="prose-polisher-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>Prose Polisher (Regex + AI)</b>
+            <div class="inline-drawer-icon fa-solid fa-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <p>A comprehensive tool to enhance AI writing quality by fixing echoes and repetitive phrases ('slop').</p>
+            <hr>
+            <div class="form-group">
+                <label class="checkbox_label">
+                    <input type="checkbox" id="prose_polisher_enable_static">
+                    <span><b>Enable Static Regex Fixes:</b> Instantly corrects common slop using a curated list.</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label class="checkbox_label">
+                    <input type="checkbox" id="prose_polisher_enable_dynamic">
+                    <span><b>Enable Dynamic AI Learning:</b> Automatically detects new slop and generates new regex rules.</span>
+                </label>
+            </div>
+            <hr>
+            <label for="prose_polisher_dynamic_trigger">Dynamic Learning Trigger (messages):</label>
+            <input type="number" id="prose_polisher_dynamic_trigger" class="text_pole" min="5">
+            <small>After how many AI messages to analyze for new slop and generate rules. Default: 30.</small>
+
+            <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px;">
+                <button id="prose_polisher_open_navigator_button" class="menu_button">
+                    <i class="fa-solid fa-gears"></i> Open Regex Navigator
+                </button>
+                 <button id="prose_polisher_clear_frequency_button" class="menu_button">
+                    <i class="fa-solid fa-eraser"></i> Clear Frequency Data
+                </button>
+                <button id="prose_polisher_analyze_chat_button" class="menu_button" title="Analyze the entire current chat history for new slop.">
+                    <i class="fa-solid fa-magnifying-glass-chart"></i> Analyze Chat History
+                </button>
+                <button id="prose_polisher_view_frequency_button" class="menu_button" title="View the currently tracked repetitive phrases.">
+                    <i class="fa-solid fa-list-ol"></i> View Frequency Data
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

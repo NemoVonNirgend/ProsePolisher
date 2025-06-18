@@ -1,0 +1,84 @@
+/* --- CSS Variables --- */
+:root {
+    --nemo-primary-accent: var(--primary-accent, #ff8c00);
+    --nemo-secondary-accent: var(--secondary-accent, #ffc107);
+    --nemo-primary-bg: var(--secondary-bg, #2c2f33);
+    --nemo-secondary-bg: var(--main-bg, #232528);
+    --nemo-tertiary-bg: var(--tertiary-bg, #36393f);
+    --nemo-item-hover-bg: var(--tertiary-bg-with-hover, #40444b);
+    --nemo-text-color: var(--text-color, #dcddde);
+    --nemo-text-muted: var(--text-color-secondary, #b9bbbe);
+    --nemo-border-color: var(--border-color, #444);
+    --nemo-shadow-color: rgba(0, 0, 0, 0.3);
+    --nemo-glow-color: var(--secondary-accent-glow, rgba(255, 193, 7, 0.7));
+}
+
+/* --- Settings Panel --- */
+.prose-polisher-settings .inline-drawer-content small {
+    display: block;
+    margin-top: 5px;
+    color: var(--nemo-text-muted);
+}
+
+/* --- PROSE POLISHER REGEX NAVIGATOR --- */
+/* This section clones the look and feel of your Preset Navigator for consistency. */
+.prose-polisher-regex-navigator-modal { display: none; position: fixed; z-index: 9999; inset: 0; overflow: auto; background-color: rgba(0,0,0,0.6); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); }
+.prose-polisher-regex-navigator-modal .modal-content { color: var(--nemo-text-color); background: var(--nemo-primary-bg); margin: 5vh auto; padding: 20px; border: 1px solid var(--nemo-border-color); width: 90%; max-width: 1400px; height: 90vh; display: flex; flex-direction: column; border-radius: 12px; box-shadow: 0 8px 32px var(--nemo-shadow-color); }
+.prose-polisher-regex-navigator-modal .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--nemo-border-color); padding-bottom: 10px; margin-bottom: 15px; flex-shrink: 0; }
+.prose-polisher-regex-navigator-modal .modal-header h2 { margin: 0; color: var(--nemo-primary-accent); }
+.prose-polisher-regex-navigator-modal .close-button { color: var(--nemo-text-muted); font-size: 28px; font-weight: bold; cursor: pointer; transition: color 0.2s, transform 0.2s; }
+.prose-polisher-regex-navigator-modal .close-button:hover { color: #fff; transform: scale(1.1); }
+.prose-polisher-regex-navigator-modal .navigator-body { display: flex; flex-grow: 1; overflow: hidden; }
+.prose-polisher-regex-navigator-modal .navigator-main-panel { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--nemo-secondary-bg); padding: 15px; border-radius: 8px; }
+#regex-navigator-list-view { overflow-y: auto; flex-grow: 1; padding: 10px; display: flex; flex-direction: column; gap: 5px; }
+.regex-navigator-item { display: flex; align-items: center; padding: 8px 12px; background-color: var(--nemo-tertiary-bg); border-radius: 6px; cursor: pointer; border: 2px solid transparent; transition: all 0.2s ease; }
+.regex-navigator-item:hover { background-color: var(--nemo-item-hover-bg); border-color: #555; }
+.regex-navigator-item.is-dynamic { border-left: 4px solid var(--nemo-secondary-accent); }
+.regex-navigator-item.is-disabled { opacity: 0.6; }
+.regex-navigator-item.is-disabled .item-details .script-name { text-decoration: line-through; }
+.regex-navigator-item .item-icon { font-size: 1.2em; margin-right: 15px; color: var(--nemo-primary-accent); width: 20px; text-align: center; }
+.regex-navigator-item .item-details { flex-grow: 1; min-width: 0; }
+.regex-navigator-item .item-details .script-name { font-weight: bold; }
+.regex-navigator-item .item-details .find-regex { font-family: 'Courier New', monospace; font-size: 0.9em; color: var(--nemo-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.regex-navigator-item .item-status { margin-left: auto; padding-left: 15px; display: flex; align-items: center; gap: 10px; }
+.prose-polisher-regex-navigator-modal .modal-footer { border-top: 1px solid var(--nemo-border-color); padding-top: 15px; margin-top: 15px; display: flex; justify-content: flex-end; align-items: center; flex-shrink: 0; }
+
+/* NEW: Glow effect for newly added rules */
+@keyframes pulse-glow { 
+    0% { box-shadow: 0 0 5px var(--nemo-glow-color), 0 0 10px var(--nemo-glow-color); } 
+    50% { box-shadow: 0 0 10px var(--nemo-glow-color), 0 0 20px var(--nemo-glow-color); } 
+    100% { box-shadow: 0 0 5px var(--nemo-glow-color), 0 0 10px var(--nemo-glow-color); } 
+}
+.regex-navigator-item.is-newly-added {
+    border-color: var(--nemo-secondary-accent);
+    animation: pulse-glow 2s infinite ease-in-out;
+}
+
+/* Rule Editor Popup Styles */
+.prose-polisher-rule-editor-popup { display: flex; flex-direction: column; gap: 15px; width: 100%; }
+.prose-polisher-rule-editor-popup label { font-weight: bold; margin-bottom: -10px; }
+.prose-polisher-rule-editor-popup .text_pole, .prose-polisher-rule-editor-popup textarea { width: 100%; box-sizing: border-box; }
+.prose-polisher-rule-editor-popup textarea { resize: vertical; min-height: 80px; font-family: 'Courier New', monospace; }
+.prose-polisher-rule-editor-popup .editor-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+.prose-polisher-rule-editor-popup .editor-actions .actions-left { display: flex; gap: 10px; }
+
+/* NEW: Frequency Leaderboard Popup Styles */
+.prose-polisher-frequency-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+.prose-polisher-frequency-table th, .prose-polisher-frequency-table td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--nemo-border-color);
+}
+.prose-polisher-frequency-table th {
+    background-color: var(--nemo-tertiary-bg);
+    color: var(--nemo-primary-accent);
+}
+.prose-polisher-frequency-table td:last-child {
+    text-align: center;
+    font-weight: bold;
+    font-size: 1.1em;
+}
