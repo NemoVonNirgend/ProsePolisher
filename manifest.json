@@ -1,8 +1,8 @@
 {
     "display_name": "Prose Polisher (Regex + AI)",
     "author": "@NemoVonNirgend & AI Collaboration",
-    "version": "3.1.0",
-    "description": "A comprehensive writing assistant. Fixes 'slop' with an editable regex list, uses AI to learn new rules for repetitive phrases, and automatically capitalizes sentences for grammatically correct, seamless replacements. Includes a full Regex Navigator.",
+    "version": "3.2.0",
+    "description": "A comprehensive writing assistant. Fixes 'slop' with an editable regex list, uses AI to learn new rules for repetitive phrases, and automatically capitalizes sentences for grammatically correct, seamless replacements. Includes a full Regex Navigator and a user-configurable blacklist.",
     "requires": [],
     "optional": [],
     "js": "content.js",
