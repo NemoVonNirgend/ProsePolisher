@@ -58,9 +58,6 @@ After installation, navigate to the Extensions settings panel. You will find the
 
 ### The Settings Panel
 
-![Prose Polisher Settings](https_placeholder_for_screenshot_of_settings_panel.png)
-*(A screenshot of the settings UI would be great here.)*
-
 *   **Auto-Rule Gen Trigger:** This number determines how many AI messages to wait *after* a slop candidate has been identified before sending it to the AI for rule generation. A lower number means faster rule creation; a higher number means it will batch more candidates together.
 *   **Open Regex Navigator:** Opens the main UI for managing all your rules.
 *   **Clear Frequency Data:** Resets all tracked phrase counts. Use this if you switch models or characters and want to start fresh.
