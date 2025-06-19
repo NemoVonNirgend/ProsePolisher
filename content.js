@@ -44,6 +44,7 @@ const defaultSettings = {
     isDynamicEnabled: false,
     dynamicTriggerCount: 30,
     dynamicRules: [],
+    blacklist: ["the", "and", "is", "a", "it", "in", "of", "to", "was", "for", "on", "with"], // Added blacklist with common defaults
 };
 
 // 2. HELPER FUNCTIONS
@@ -70,6 +71,22 @@ function isPhraseHandledByRegex(phrase) {
         }
     }
     return false;
+}
+
+/**
+ * NEW: Checks if a given phrase contains any of the blacklisted words.
+ * This is case-insensitive.
+ * @param {string} phrase The phrase to check.
+ * @returns {boolean} True if the phrase contains a blacklisted word, false otherwise.
+ */
+function isPhraseBlacklisted(phrase) {
+    const blacklist = extension_settings[EXTENSION_NAME]?.blacklist || [];
+    if (blacklist.length === 0) return false;
+
+    const lowerCasePhrase = phrase.toLowerCase();
+    // Use a regex for faster checking of whole words. \b ensures we match 'he' but not 'the'.
+    const blacklistRegex = new RegExp(`\\b(${blacklist.join('|')})\\b`, 'i');
+    return blacklistRegex.test(lowerCasePhrase);
 }
 
 function cullSubstrings(frequenciesObject) {
@@ -265,7 +282,9 @@ function analyzeAndTrackFrequency(text) {
         for (let n = NGRAM_MIN; n <= NGRAM_MAX; n++) {
             const ngrams = generateNgrams(sentence, n);
             for (const ngram of ngrams) {
-                if (ngram.length < 12 || isPhraseHandledByRegex(ngram)) continue;
+                // MODIFIED: Added blacklist check
+                if (ngram.length < 12 || isPhraseHandledByRegex(ngram) || isPhraseBlacklisted(ngram)) continue;
+                
                 const currentData = ngramFrequencies.get(ngram) || { count: 0 };
                 const newCount = currentData.count + 1;
                 ngramFrequencies.set(ngram, { count: newCount, lastSeenMessageIndex: totalAiMessagesProcessed });
@@ -468,6 +487,68 @@ function showFrequencyLeaderboard() {
     callGenericPopup(contentHtml, POPUP_TYPE.TEXT, "Live Frequency Data (with Pattern Analysis)", { wide: true, large: true });
 }
 
+/**
+ * NEW: Displays a popup for managing the blacklist.
+ */
+function showBlacklistManager() {
+    const settings = extension_settings[EXTENSION_NAME];
+
+    const container = document.createElement('div');
+    container.className = 'prose-polisher-blacklist-manager';
+    container.innerHTML = `
+        <h4>Blacklist Manager</h4>
+        <p>Add words to this list to prevent any phrase containing them from being analyzed for repetition. The check is case-insensitive. Whole words only.</p>
+        <ul id="pp-blacklist-list"></ul>
+        <div class="blacklist-add-controls">
+            <input type="text" id="pp-blacklist-input" class="text_pole" placeholder="Add a word...">
+            <button id="pp-blacklist-add-btn" class="menu_button">Add</button>
+        </div>
+    `;
+
+    const listElement = container.querySelector('#pp-blacklist-list');
+    const inputElement = container.querySelector('#pp-blacklist-input');
+    const addButton = container.querySelector('#pp-blacklist-add-btn');
+
+    const renderBlacklist = () => {
+        listElement.innerHTML = '';
+        settings.blacklist.sort().forEach(word => {
+            const item = document.createElement('li');
+            item.className = 'blacklist-item';
+            item.innerHTML = `
+                <span>${word}</span>
+                <i class="fa-solid fa-trash-can blacklist-delete-btn" data-word="${word}"></i>
+            `;
+            item.querySelector('.blacklist-delete-btn').addEventListener('click', () => {
+                settings.blacklist = settings.blacklist.filter(w => w !== word);
+                saveSettingsDebounced();
+                renderBlacklist();
+            });
+            listElement.appendChild(item);
+        });
+    };
+
+    const addWord = () => {
+        const newWord = inputElement.value.trim().toLowerCase();
+        if (newWord && !settings.blacklist.includes(newWord)) {
+            settings.blacklist.push(newWord);
+            saveSettingsDebounced();
+            renderBlacklist();
+            inputElement.value = '';
+        }
+        inputElement.focus();
+    };
+
+    addButton.addEventListener('click', addWord);
+    inputElement.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            addWord();
+        }
+    });
+
+    renderBlacklist();
+    callGenericPopup(container, POPUP_TYPE.DISPLAY, "Blacklist Manager", { wide: false, large: false });
+}
+
 
 // 4. EVENT HANDLING & INITIALIZATION
 // -----------------------------------------------------------------------------
@@ -651,7 +732,7 @@ async function initializeProsePolisher() {
         staticRules = await staticResponse.json();
         const settingsHtml = await fetch(`${EXTENSION_FOLDER_PATH}/settings.html`).then(res => res.text());
         document.getElementById('extensions_settings').insertAdjacentHTML('beforeend', settingsHtml);
-        const staticToggle = document.getElementById('prose_polisher_enable_static'), dynamicToggle = document.getElementById('prose_polisher_enable_dynamic'), triggerInput = document.getElementById('prose_polisher_dynamic_trigger'), navigatorBtn = document.getElementById('prose_polisher_open_navigator_button'), clearFreqBtn = document.getElementById('prose_polisher_clear_frequency_button'), analyzeChatBtn = document.getElementById('prose_polisher_analyze_chat_button'), viewFreqBtn = document.getElementById('prose_polisher_view_frequency_button'), generateRulesBtn = document.getElementById('prose_polisher_generate_rules_button');
+        const staticToggle = document.getElementById('prose_polisher_enable_static'), dynamicToggle = document.getElementById('prose_polisher_enable_dynamic'), triggerInput = document.getElementById('prose_polisher_dynamic_trigger'), navigatorBtn = document.getElementById('prose_polisher_open_navigator_button'), clearFreqBtn = document.getElementById('prose_polisher_clear_frequency_button'), analyzeChatBtn = document.getElementById('prose_polisher_analyze_chat_button'), viewFreqBtn = document.getElementById('prose_polisher_view_frequency_button'), generateRulesBtn = document.getElementById('prose_polisher_generate_rules_button'), manageBlacklistBtn = document.getElementById('prose_polisher_manage_blacklist_button'); // NEW: Get blacklist button
         staticToggle.checked = extension_settings[EXTENSION_NAME].isStaticEnabled;
         dynamicToggle.checked = extension_settings[EXTENSION_NAME].isDynamicEnabled;
         triggerInput.value = extension_settings[EXTENSION_NAME].dynamicTriggerCount;
@@ -665,6 +746,7 @@ async function initializeProsePolisher() {
         analyzeChatBtn.addEventListener('pointerup', manualAnalyzeChatHistory);
         viewFreqBtn.addEventListener('pointerup', showFrequencyLeaderboard);
         generateRulesBtn.addEventListener('pointerup', handleGenerateRulesFromAnalysisClick);
+        manageBlacklistBtn.addEventListener('pointerup', showBlacklistManager); // NEW: Add event listener
         clearFreqBtn.addEventListener('pointerup', () => { ngramFrequencies.clear(); slopCandidates.clear(); messageCounterForTrigger = 0; totalAiMessagesProcessed = 0; analyzedLeaderboardData = { merged: [], remaining: [] }; toastr.success("Prose Polisher frequency data cleared!"); });
 
         eventSource.on(event_types.MESSAGE_SENT, handleMessageSent);
