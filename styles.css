@@ -75,3 +75,55 @@
     font-weight: bold;
     color: var(--nemo-secondary-accent);
 }
+
+/* NEW: Styles for Blacklist Manager Popup */
+.prose-polisher-blacklist-manager {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+.prose-polisher-blacklist-manager h4 {
+    margin: 0;
+    color: var(--nemo-primary-accent);
+    border-bottom: 1px solid var(--nemo-border-color);
+    padding-bottom: 8px;
+}
+.prose-polisher-blacklist-manager #pp-blacklist-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 250px;
+    overflow-y: auto;
+    background-color: var(--nemo-secondary-bg);
+    border: 1px solid var(--nemo-border-color);
+    border-radius: 5px;
+    padding: 5px;
+}
+.prose-polisher-blacklist-manager .blacklist-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background-color: var(--nemo-tertiary-bg);
+    border-radius: 4px;
+    margin-bottom: 5px;
+}
+.prose-polisher-blacklist-manager .blacklist-item:last-child {
+    margin-bottom: 0;
+}
+.prose-polisher-blacklist-manager .blacklist-delete-btn {
+    cursor: pointer;
+    color: var(--nemo-text-muted);
+    transition: color 0.2s ease;
+}
+.prose-polisher-blacklist-manager .blacklist-delete-btn:hover {
+    color: #f04747; /* Danger red */
+}
+.prose-polisher-blacklist-manager .blacklist-add-controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 5px;
+}
+.prose-polisher-blacklist-manager .blacklist-add-controls .text_pole {
+    flex-grow: 1;
+}
