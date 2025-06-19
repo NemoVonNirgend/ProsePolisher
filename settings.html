@@ -16,13 +16,13 @@
             <div class="form-group">
                 <label class="checkbox_label">
                     <input type="checkbox" id="prose_polisher_enable_dynamic">
-                    <span><b>Enable Dynamic AI Learning:</b> Automatically detects new slop and generates new regex rules.</span>
+                    <span><b>Enable Dynamic AI Learning:</b> Automatically detects new slop and generates new regex rules based on message frequency.</span>
                 </label>
             </div>
             <hr>
-            <label for="prose_polisher_dynamic_trigger">Dynamic Learning Trigger (messages):</label>
+            <label for="prose_polisher_dynamic_trigger">Auto-Rule Gen Trigger (messages after new slop detected):</label>
             <input type="number" id="prose_polisher_dynamic_trigger" class="text_pole" min="5">
-            <small>After how many AI messages to analyze for new slop and generate rules. Default: 30.</small>
+            <small>After a phrase hits the slop threshold, how many *more* AI messages until AI attempts to generate rules. Default: 30. Set higher to batch more candidates.</small>
 
             <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px;">
                 <button id="prose_polisher_open_navigator_button" class="menu_button">
@@ -31,11 +31,14 @@
                  <button id="prose_polisher_clear_frequency_button" class="menu_button">
                     <i class="fa-solid fa-eraser"></i> Clear Frequency Data
                 </button>
-                <button id="prose_polisher_analyze_chat_button" class="menu_button" title="Analyze the entire current chat history for new slop.">
+                <button id="prose_polisher_analyze_chat_button" class="menu_button" title="Analyze the entire current chat history to populate frequency data for potential slop. Does not auto-generate rules.">
                     <i class="fa-solid fa-magnifying-glass-chart"></i> Analyze Chat History
                 </button>
-                <button id="prose_polisher_view_frequency_button" class="menu_button" title="View the currently tracked repetitive phrases.">
+                <button id="prose_polisher_view_frequency_button" class="menu_button" title="View the currently tracked repetitive phrases and their counts.">
                     <i class="fa-solid fa-list-ol"></i> View Frequency Data
+                </button>
+                <button id="prose_polisher_generate_rules_button" class="menu_button" title="Manually trigger AI to generate regex rules for currently identified slop candidates.">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Generate AI Rules from Analysis
                 </button>
             </div>
         </div>
