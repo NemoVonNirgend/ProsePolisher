@@ -1,6 +1,5 @@
 ---
 # Prose Polisher (Regex + AI) for SillyTavern
-
 **Version:** 3.1.0
 
 A comprehensive writing assistant for SillyTavern designed to elevate the quality of AI-generated prose. Prose Polisher automatically identifies and corrects repetitive, clichéd phrasing (often called "slop") using a powerful combination of curated static rules and a dynamic AI learning system.
