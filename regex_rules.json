@@ -331,7 +331,7 @@
         "id": "STATIC_040",
         "scriptName": "Slopfix - Randomize 'Seven'",
         "findRegex": "\\b([Ss])even\\b",
-        "replaceString": "{{random:$1ix,$1ive,$1ight,$1ine,$1en,four,three,two,one,zero,eleven,twelve,thirteen,fourteen,fifteen,a couple,a few,half a dozen,a dozen,nearly a dozen,about ten,around eight,seven or eight,five or six,nine or ten}}",
+        "replaceString": "{{random:one,zero,two,three,four,five,six,seven,eight,nine}}",
         "disabled": false,
         "isStatic": true
     },
