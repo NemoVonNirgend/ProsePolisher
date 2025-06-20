@@ -1,4 +1,3 @@
-// Import necessary SillyTavern objects/functions
 import {
     saveSettingsDebounced,
     eventSource,
@@ -20,6 +19,8 @@ const PROSE_POLISHER_ID_PREFIX = '_prosePolisherRule_';
 const SLOP_THRESHOLD = 3;
 const BATCH_SIZE = 5;
 const MANUAL_ANALYSIS_CHUNK_SIZE = 20;
+const HEAVY_ANALYSIS_INTERVAL = 200;
+const CANDIDATE_LIMIT_FOR_ANALYSIS = 2000;
 const PRUNE_AFTER_MESSAGES = 20;
 const PRUNE_CHECK_INTERVAL = 10;
 const NGRAM_MIN = 3;
@@ -44,7 +45,8 @@ const defaultSettings = {
     isDynamicEnabled: false,
     dynamicTriggerCount: 30,
     dynamicRules: [],
-    blacklist: ["the", "and", "is", "a", "it", "in", "of", "to", "was", "for", "on", "with"], // Added blacklist with common defaults
+    whitelist: ["the", "and", "is", "a", "it", "in", "of", "to", "was", "for", "on", "with"],
+    blacklist: [],
 };
 
 // 2. HELPER FUNCTIONS
@@ -73,18 +75,18 @@ function isPhraseHandledByRegex(phrase) {
     return false;
 }
 
-/**
- * NEW: Checks if a given phrase contains any of the blacklisted words.
- * This is case-insensitive.
- * @param {string} phrase The phrase to check.
- * @returns {boolean} True if the phrase contains a blacklisted word, false otherwise.
- */
+function isPhraseWhitelisted(phrase) {
+    const whitelist = extension_settings[EXTENSION_NAME]?.whitelist || [];
+    if (whitelist.length === 0) return false;
+    const lowerCasePhrase = phrase.toLowerCase();
+    const whitelistRegex = new RegExp(`\\b(${whitelist.join('|')})\\b`, 'i');
+    return whitelistRegex.test(lowerCasePhrase);
+}
+
 function isPhraseBlacklisted(phrase) {
     const blacklist = extension_settings[EXTENSION_NAME]?.blacklist || [];
     if (blacklist.length === 0) return false;
-
     const lowerCasePhrase = phrase.toLowerCase();
-    // Use a regex for faster checking of whole words. \b ensures we match 'he' but not 'the'.
     const blacklistRegex = new RegExp(`\\b(${blacklist.join('|')})\\b`, 'i');
     return blacklistRegex.test(lowerCasePhrase);
 }
@@ -113,149 +115,135 @@ function cullSubstrings(frequenciesObject) {
 // 3. CORE LOGIC & PATTERN FINDING
 // -----------------------------------------------------------------------------
 function findAndMergePatterns(frequencies) {
-    let candidates = Object.entries(frequencies).filter(([, count]) => count > 1);
-    candidates.sort(([, countA], [, countB]) => countB - countA);
-
+    const culledFrequencies = cullSubstrings(frequencies);
+    const candidates = Object.entries(culledFrequencies).sort((a, b) => a[0].localeCompare(b[0]));
     const mergedPatterns = {};
-    const consumedPhrases = new Set();
+    const consumedIndices = new Set();
 
     for (let i = 0; i < candidates.length; i++) {
-        const [phraseA] = candidates[i];
-        if (consumedPhrases.has(phraseA)) continue;
+        if (consumedIndices.has(i)) continue;
 
-        let bestPattern = null;
-        let bestPatternMatches = [];
-        let bestPatternCount = 0;
+        const [phraseA, countA] = candidates[i];
+        const wordsA = phraseA.split(' ');
+        let currentGroup = [{ index: i, phrase: phraseA, count: countA }];
 
         for (let j = i + 1; j < candidates.length; j++) {
             const [phraseB] = candidates[j];
-            if (consumedPhrases.has(phraseB)) continue;
-
-            const wordsA = phraseA.split(' ');
             const wordsB = phraseB.split(' ');
-            if (Math.abs(wordsA.length - wordsB.length) > 3) continue;
-
             let commonPrefix = [];
             for (let k = 0; k < Math.min(wordsA.length, wordsB.length); k++) {
-                if (wordsA[k] === wordsB[k]) {
-                    commonPrefix.push(wordsA[k]);
-                } else {
-                    break;
-                }
+                if (wordsA[k] === wordsB[k]) commonPrefix.push(wordsA[k]);
+                else break;
             }
-
             if (commonPrefix.length >= PATTERN_MIN_COMMON_WORDS) {
-                const patternRegex = new RegExp('^' + commonPrefix.join('\\s+') + '(\\s+.*)?$');
-                
-                let currentMatches = [];
-                let currentVariations = new Set();
-                let currentCount = 0;
-
-                // Iterate over the whole frequency list to find all phrases matching the prefix
-                for (const [p, c] of Object.entries(frequencies)) {
-                    if (patternRegex.test(p)) {
-                        currentMatches.push(p);
-                        currentCount += c;
-                        const wordsInP = p.split(' ');
-                        const variationPart = wordsInP.slice(commonPrefix.length).join(' ').trim();
-                        if (variationPart) {
-                            currentVariations.add(variationPart);
-                        }
-                    }
-                }
-                
-                // A valid pattern must merge at least two different phrases and be better than the last one
-                if (currentMatches.length > 1 && currentMatches.length > bestPatternMatches.length) {
-                    const variationString = Array.from(currentVariations).join('/');
-                    
-                    // Only create a pattern if there are actual variations to show
-                    if (variationString) {
-                        bestPattern = commonPrefix.join(' ') + ' ' + variationString;
-                        bestPatternMatches = currentMatches;
-                        bestPatternCount = currentCount;
-                    }
-                }
+                 if (!consumedIndices.has(j)) {
+                    currentGroup.push({ index: j, phrase: phraseB, count: candidates[j][1] });
+                 }
+            } else {
+                break;
             }
         }
-        
-        if (bestPattern) {
-            mergedPatterns[bestPattern] = bestPatternCount;
-            bestPatternMatches.forEach(p => consumedPhrases.add(p));
+
+        if (currentGroup.length > 1) {
+            let totalCount = 0;
+            const variations = new Set();
+            let commonPrefixString = '';
+            const firstWords = currentGroup[0].phrase.split(' ');
+
+            currentGroup.forEach(item => {
+                totalCount += item.count;
+                consumedIndices.add(item.index);
+                const itemWords = item.phrase.split(' ');
+                if (commonPrefixString === '') {
+                    let prefixLength = firstWords.length;
+                    for (let k = 1; k < currentGroup.length; k++) {
+                        const otherWords = currentGroup[k].phrase.split(' ');
+                        let currentPrefixLength = 0;
+                        while(currentPrefixLength < prefixLength && currentPrefixLength < otherWords.length && firstWords[currentPrefixLength] === otherWords[currentPrefixLength]) {
+                            currentPrefixLength++;
+                        }
+                        prefixLength = currentPrefixLength;
+                    }
+                    commonPrefixString = firstWords.slice(0, prefixLength).join(' ');
+                }
+                const variationPart = itemWords.slice(commonPrefixString.split(' ').length).join(' ').trim();
+                if (variationPart) variations.add(variationPart);
+            });
+            if (variations.size > 0) {
+                const pattern = `${commonPrefixString} ${Array.from(variations).join('/')}`;
+                mergedPatterns[pattern] = totalCount;
+            } else {
+                 consumedIndices.add(currentGroup[0].index);
+            }
         }
     }
 
     const remaining = {};
-    for (const [phrase, count] of Object.entries(frequencies)) {
-        if (!consumedPhrases.has(phrase)) {
+    for (let i = 0; i < candidates.length; i++) {
+        if (!consumedIndices.has(i)) {
+            const [phrase, count] = candidates[i];
             remaining[phrase] = count;
         }
     }
-
     return { merged: mergedPatterns, remaining: remaining };
 }
 
 
 function performIntermediateAnalysis() {
-    const frequenciesForCulling = {};
+    const allCandidates = [];
     for (const [phrase, data] of ngramFrequencies.entries()) {
-        frequenciesForCulling[phrase] = data.count;
+        if (data.count > 1) {
+            allCandidates.push([phrase, data.count]);
+        }
     }
-    const culledFrequencies = cullSubstrings(frequenciesForCulling);
-    const { merged, remaining } = findAndMergePatterns(culledFrequencies);
-    
+    allCandidates.sort((a, b) => b[1] - a[1]);
+    const limitedCandidates = allCandidates.slice(0, CANDIDATE_LIMIT_FOR_ANALYSIS);
+
+    if (allCandidates.length > CANDIDATE_LIMIT_FOR_ANALYSIS) {
+        console.log(`${LOG_PREFIX} [Perf] Limited candidates from ${allCandidates.length} to ${CANDIDATE_LIMIT_FOR_ANALYSIS} BEFORE heavy processing.`);
+    }
+    const { merged, remaining } = findAndMergePatterns(Object.fromEntries(limitedCandidates));
     const mergedEntries = Object.entries(merged);
-    const remainingEntries = Object.entries(remaining);
-
     mergedEntries.sort((a, b) => b[1] - a[1]);
-    remainingEntries.sort((a, b) => b[1] - a[1]);
-
+    const allRemainingEntries = Object.entries(remaining);
+    allRemainingEntries.sort((a, b) => b[1] - a[1]);
     analyzedLeaderboardData = {
         merged: mergedEntries,
-        remaining: remainingEntries,
+        remaining: allRemainingEntries,
     };
 }
 
+
 async function updateGlobalRegexArray() {
     if (!extension_settings.regex) extension_settings.regex = [];
-    // Remove old ProsePolisher rules before adding the updated set
     extension_settings.regex = extension_settings.regex.filter(rule => !rule.id?.startsWith(PROSE_POLISHER_ID_PREFIX));
-
     const rulesToAdd = [];
     const settings = extension_settings[EXTENSION_NAME];
     if (settings.isStaticEnabled) rulesToAdd.push(...staticRules);
     if (settings.isDynamicEnabled) rulesToAdd.push(...dynamicRules);
-
     const activeRules = rulesToAdd.filter(rule => !rule.disabled);
-
     for (const rule of activeRules) {
-        // Define the rule object with the correct properties for seamless, always-on application.
         const globalRule = {
             id: `${PROSE_POLISHER_ID_PREFIX}${rule.id}`,
             scriptName: `(PP) ${rule.scriptName}`,
             findRegex: rule.findRegex,
             replaceString: rule.replaceString,
-            // Standard options
             disabled: rule.disabled,
             substituteRegex: 0,
             minDepth: null,
             maxDepth: null,
             trimStrings: [],
-            // 'Affects' setting: AI Output
             placement: [2],
-            // 'Other Options'
-            runOnEdit: false, // Set to false to run on every generation, not just edits.
-            // 'Ephemerality' settings
-            is_always_applied_to_display: true, // Alter Chat Display
-            is_always_applied_to_prompt: true,  // Alter Outgoing Prompt
+            runOnEdit: false,
+            is_always_applied_to_display: true,
+            is_always_applied_to_prompt: true,
         };
         extension_settings.regex.push(globalRule);
     }
-
     compiledActiveRules = activeRules.map(rule => {
         try { return new RegExp(rule.findRegex, 'i'); }
         catch (error) { console.warn(`${LOG_PREFIX} Invalid regex in rule '${rule.scriptName}':`, error); return null; }
     }).filter(Boolean);
-
     console.log(`${LOG_PREFIX} Updated global regex array. ProsePolisher rules active: ${activeRules.length}.`);
     saveSettingsDebounced();
 }
@@ -282,13 +270,20 @@ function analyzeAndTrackFrequency(text) {
         for (let n = NGRAM_MIN; n <= NGRAM_MAX; n++) {
             const ngrams = generateNgrams(sentence, n);
             for (const ngram of ngrams) {
-                // MODIFIED: Added blacklist check
-                if (ngram.length < 12 || isPhraseHandledByRegex(ngram) || isPhraseBlacklisted(ngram)) continue;
-                
+                if (ngram.length < 12 || isPhraseHandledByRegex(ngram) || isPhraseWhitelisted(ngram)) continue;
+
                 const currentData = ngramFrequencies.get(ngram) || { count: 0 };
-                const newCount = currentData.count + 1;
+                let newCount = currentData.count + 1;
+
+                // True Blacklist functionality: Boost the count for blacklisted phrases
+                if (isPhraseBlacklisted(ngram)) {
+                    console.log(`${LOG_PREFIX} Applying blacklist boost to phrase: "${ngram}"`);
+                    newCount += SLOP_THRESHOLD; // Instantly mark it as a candidate
+                }
+
                 ngramFrequencies.set(ngram, { count: newCount, lastSeenMessageIndex: totalAiMessagesProcessed });
-                if (newCount === SLOP_THRESHOLD) {
+
+                if (newCount >= SLOP_THRESHOLD && currentData.count < SLOP_THRESHOLD) {
                     processNewSlopCandidate(ngram);
                 }
             }
@@ -367,7 +362,19 @@ async function checkForSlopAndGenerateRulesController() {
 async function manualAnalyzeChatHistory() {
     if (isAnalyzingHistory) { toastr.warning("Prose Polisher: Chat history analysis is already in progress."); return; }
     isAnalyzingHistory = true;
-    toastr.info("Prose Polisher: Starting analysis of entire chat history...");
+    let messagesSinceLastHeavyAnalysis = 0;
+    const toastrId = toastr.info(
+        'Prose Polisher: Starting analysis...<br><button id="pp-cancel-analysis" class="menu_button is_dangerous" style="margin-top: 10px;">Cancel Analysis</button>',
+        "Analysis in Progress",
+        { timeOut: 0, extendedTimeOut: 0, tapToDismiss: false, preventDuplicates: true }
+    );
+    function cancelAnalysis() {
+        if (!isAnalyzingHistory) return;
+        isAnalyzingHistory = false;
+        toastr.clear(toastrId);
+        toastr.warning("Prose Polisher: Analysis cancelled by user.");
+    }
+    if (toastrId) toastrId.find('#pp-cancel-analysis').on('click', cancelAnalysis);
 
     ngramFrequencies.clear();
     slopCandidates.clear();
@@ -376,39 +383,54 @@ async function manualAnalyzeChatHistory() {
 
     const context = getContext();
     const aiMessages = context?.chat?.filter(message => !message.is_user && message.mes) || [];
-
     if (aiMessages.length === 0) {
-        toastr.info("Prose Polisher: No AI messages found in chat history to analyze.");
         isAnalyzingHistory = false;
+        if (toastrId) toastr.clear(toastrId);
+        toastr.info("Prose Polisher: No AI messages found in chat history to analyze.");
         return;
     }
+    let currentIndex = 0;
 
-    let analyzedMessageCount = 0;
-    for (let i = 0; i < aiMessages.length; i += MANUAL_ANALYSIS_CHUNK_SIZE) {
-        const chunk = aiMessages.slice(i, i + MANUAL_ANALYSIS_CHUNK_SIZE);
-
+    function processNextChunk() {
+        if (!isAnalyzingHistory) return;
+        const chunkEnd = Math.min(currentIndex + MANUAL_ANALYSIS_CHUNK_SIZE, aiMessages.length);
+        const chunk = aiMessages.slice(currentIndex, chunkEnd);
         for (const message of chunk) {
             totalAiMessagesProcessed++;
             analyzeAndTrackFrequency(message.mes);
-            analyzedMessageCount++;
         }
-
         pruneDuringManualAnalysis();
-        performIntermediateAnalysis();
+        messagesSinceLastHeavyAnalysis += chunk.length;
+        currentIndex = chunkEnd;
+        let progressMessage = `Prose Polisher: Scanned ${currentIndex} / ${aiMessages.length} messages...`;
+        if (messagesSinceLastHeavyAnalysis >= HEAVY_ANALYSIS_INTERVAL || currentIndex >= aiMessages.length) {
+            progressMessage += `<br><i>(Analyzing patterns...)</i>`;
+        }
+        progressMessage += `<br><button id="pp-cancel-analysis" class="menu_button is_dangerous" style="margin-top: 10px;">Cancel Analysis</button>`;
+        toastrId.find('.toast-message').html(progressMessage);
+        toastrId.find('#pp-cancel-analysis').on('click', cancelAnalysis);
 
-        toastr.info(`Prose Polisher: Analyzed ${analyzedMessageCount} / ${aiMessages.length} messages... (Analyzing patterns)`);
-
-        await new Promise(resolve => setTimeout(resolve, 50));
+        if (messagesSinceLastHeavyAnalysis >= HEAVY_ANALYSIS_INTERVAL || currentIndex >= aiMessages.length) {
+            messagesSinceLastHeavyAnalysis = 0;
+            setTimeout(() => {
+                if (!isAnalyzingHistory) return;
+                console.log(`${LOG_PREFIX} Performing periodic heavy analysis at message ${currentIndex}.`);
+                performIntermediateAnalysis();
+                if (currentIndex >= aiMessages.length) completeAnalysis();
+                else setTimeout(processNextChunk, 0);
+            }, 50);
+        } else {
+            setTimeout(processNextChunk, 0);
+        }
     }
-
-    isAnalyzingHistory = false;
-
-    if (slopCandidates.size > 0) {
-        toastr.success(`Prose Polisher: Analysis complete. ${slopCandidates.size} potential slop phrases identified.`);
-    } else {
-        toastr.info("Prose Polisher: Analysis complete. No new slop candidates found meeting the threshold.");
+    function completeAnalysis() {
+        isAnalyzingHistory = false;
+        toastr.clear(toastrId);
+        if (slopCandidates.size > 0) toastr.success(`Prose Polisher: Analysis complete. ${slopCandidates.size} potential slop phrases identified.`);
+        else toastr.info("Prose Polisher: Analysis complete. No new slop candidates found meeting the threshold.");
+        showFrequencyLeaderboard();
     }
-    showFrequencyLeaderboard();
+    processNextChunk();
 }
 
 async function handleGenerateRulesFromAnalysisClick() {
@@ -462,22 +484,13 @@ function showFrequencyLeaderboard() {
     if (!isAnalyzingHistory) {
         performIntermediateAnalysis();
     }
-
     const { merged: mergedEntries, remaining: remainingEntries } = analyzedLeaderboardData;
-    
     let contentHtml;
-
     if (mergedEntries.length === 0 && remainingEntries.length === 0) {
         contentHtml = '<p>No repetitive phrases have been detected that meet display criteria.</p>';
     } else {
-        const mergedRows = mergedEntries
-            .map(([phrase, count]) => `<tr class="is-pattern"><td>${phrase}</td><td>${count}</td></tr>`)
-            .join('');
-
-        const remainingRows = remainingEntries
-            .map(([phrase, count]) => `<tr><td>${phrase}</td><td>${count}</td></tr>`)
-            .join('');
-
+        const mergedRows = mergedEntries.map(([phrase, count]) => `<tr class="is-pattern"><td>${phrase}</td><td>${count}</td></tr>`).join('');
+        const remainingRows = remainingEntries.map(([phrase, count]) => `<tr><td>${phrase}</td><td>${count}</td></tr>`).join('');
         contentHtml = `<p>The following have been detected as repetitive. Phrases in <strong>bold orange</strong> are detected patterns where similar phrases have been grouped.</p>
                        <table class="prose-polisher-frequency-table">
                            <thead><tr><th>Repetitive Phrase or Pattern</th><th>Total Count</th></tr></thead>
@@ -487,24 +500,73 @@ function showFrequencyLeaderboard() {
     callGenericPopup(contentHtml, POPUP_TYPE.TEXT, "Live Frequency Data (with Pattern Analysis)", { wide: true, large: true });
 }
 
-/**
- * NEW: Displays a popup for managing the blacklist.
- */
+function showWhitelistManager() {
+    const settings = extension_settings[EXTENSION_NAME];
+    const container = document.createElement('div');
+    container.className = 'prose-polisher-whitelist-manager';
+    container.innerHTML = `
+        <h4>Whitelist Manager</h4>
+        <p>Add approved words to this list. Any phrase containing these words will be <strong>ignored</strong> by the frequency analyzer. Good for common words or character names.</p>
+        <div class="list-container">
+            <ul id="pp-whitelist-list"></ul>
+        </div>
+        <div class="add-controls">
+            <input type="text" id="pp-whitelist-input" class="text_pole" placeholder="Add a word to ignore...">
+            <button id="pp-whitelist-add-btn" class="menu_button">Add</button>
+        </div>
+    `;
+    const listElement = container.querySelector('#pp-whitelist-list');
+    const inputElement = container.querySelector('#pp-whitelist-input');
+    const addButton = container.querySelector('#pp-whitelist-add-btn');
+
+    const renderWhitelist = () => {
+        listElement.innerHTML = '';
+        settings.whitelist.sort().forEach(word => {
+            const item = document.createElement('li');
+            item.className = 'list-item';
+            item.innerHTML = `<span>${word}</span><i class="fa-solid fa-trash-can delete-btn" data-word="${word}"></i>`;
+            item.querySelector('.delete-btn').addEventListener('click', () => {
+                settings.whitelist = settings.whitelist.filter(w => w !== word);
+                saveSettingsDebounced();
+                renderWhitelist();
+            });
+            listElement.appendChild(item);
+        });
+    };
+
+    const addWord = () => {
+        const newWord = inputElement.value.trim().toLowerCase();
+        if (newWord && !settings.whitelist.includes(newWord)) {
+            settings.whitelist.push(newWord);
+            saveSettingsDebounced();
+            renderWhitelist();
+            inputElement.value = '';
+        }
+        inputElement.focus();
+    };
+
+    addButton.addEventListener('click', addWord);
+    inputElement.addEventListener('keydown', (event) => { if (event.key === 'Enter') addWord(); });
+
+    renderWhitelist();
+    callGenericPopup(container, POPUP_TYPE.DISPLAY, "Whitelist Manager", { wide: false, large: false });
+}
+
 function showBlacklistManager() {
     const settings = extension_settings[EXTENSION_NAME];
-
     const container = document.createElement('div');
     container.className = 'prose-polisher-blacklist-manager';
     container.innerHTML = `
         <h4>Blacklist Manager</h4>
-        <p>Add words to this list to prevent any phrase containing them from being analyzed for repetition. The check is case-insensitive. Whole words only.</p>
-        <ul id="pp-blacklist-list"></ul>
-        <div class="blacklist-add-controls">
-            <input type="text" id="pp-blacklist-input" class="text_pole" placeholder="Add a word...">
+        <p>Add banned words to this list. Any phrase containing these words will be <strong>prioritized</strong> for slop analysis, making them much more likely to have rules generated.</p>
+        <div class="list-container">
+            <ul id="pp-blacklist-list"></ul>
+        </div>
+        <div class="add-controls">
+            <input type="text" id="pp-blacklist-input" class="text_pole" placeholder="Add a word to prioritize...">
             <button id="pp-blacklist-add-btn" class="menu_button">Add</button>
         </div>
     `;
-
     const listElement = container.querySelector('#pp-blacklist-list');
     const inputElement = container.querySelector('#pp-blacklist-input');
     const addButton = container.querySelector('#pp-blacklist-add-btn');
@@ -513,12 +575,9 @@ function showBlacklistManager() {
         listElement.innerHTML = '';
         settings.blacklist.sort().forEach(word => {
             const item = document.createElement('li');
-            item.className = 'blacklist-item';
-            item.innerHTML = `
-                <span>${word}</span>
-                <i class="fa-solid fa-trash-can blacklist-delete-btn" data-word="${word}"></i>
-            `;
-            item.querySelector('.blacklist-delete-btn').addEventListener('click', () => {
+            item.className = 'list-item';
+            item.innerHTML = `<span>${word}</span><i class="fa-solid fa-trash-can delete-btn" data-word="${word}"></i>`;
+            item.querySelector('.delete-btn').addEventListener('click', () => {
                 settings.blacklist = settings.blacklist.filter(w => w !== word);
                 saveSettingsDebounced();
                 renderBlacklist();
@@ -539,11 +598,7 @@ function showBlacklistManager() {
     };
 
     addButton.addEventListener('click', addWord);
-    inputElement.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            addWord();
-        }
-    });
+    inputElement.addEventListener('keydown', (event) => { if (event.key === 'Enter') addWord(); });
 
     renderBlacklist();
     callGenericPopup(container, POPUP_TYPE.DISPLAY, "Blacklist Manager", { wide: false, large: false });
@@ -567,28 +622,15 @@ function handleSentenceCapitalization(messageElement) {
     if (!messageElement) return;
     const messageTextElement = messageElement.querySelector('.mes_text');
     if (!messageTextElement) return;
-
     let textContent = messageTextElement.innerHTML;
     const originalHTML = textContent;
-
-    // 1. Capitalize the very first letter of the entire message, if it's lowercase.
-    // This regex skips over any initial HTML tags to find the first actual letter.
-    textContent = textContent.replace(/^(\s*<[^>]*>)*([a-z])/, (match, tags, letter) => {
-        return `${tags || ''}${letter.toUpperCase()}`;
-    });
-
-    // 2. Capitalize letters following sentence-ending punctuation (. ? !) ONLY.
-    // This regex correctly ignores commas and skips over any HTML tags.
-    textContent = textContent.replace(/([.!?])(\s*<[^>]*>)*\s+([a-z])/g, (match, punc, tags, letter) => {
-        return `${punc}${tags || ''} ${letter.toUpperCase()}`;
-    });
-
+    textContent = textContent.replace(/^(\s*<[^>]*>)*([a-z])/, (match, tags, letter) => `${tags || ''}${letter.toUpperCase()}`);
+    textContent = textContent.replace(/([.!?])(\s*<[^>]*>)*\s+([a-z])/g, (match, punc, tags, letter) => `${punc}${tags || ''} ${letter.toUpperCase()}`);
     if (textContent !== originalHTML) {
         console.log(`${LOG_PREFIX} Applying enhanced auto-capitalization to a rendered message.`);
         messageTextElement.innerHTML = textContent;
     }
 }
-
 
 function handleMessageSent(data) {
     if (data.is_user || !data.message) return;
@@ -611,7 +653,6 @@ function handleMessageSent(data) {
 
 class RegexNavigator {
     constructor() {}
-
     async open() {
         dynamicRules.forEach(rule => delete rule.isNew);
         const container = document.createElement('div');
@@ -624,7 +665,6 @@ class RegexNavigator {
         container.querySelector('#prose-polisher-new-rule-btn').addEventListener('pointerup', () => this.openRuleEditor(null));
         callGenericPopup(container, POPUP_TYPE.DISPLAY, 'Regex Rule Navigator', { wide: true, large: true, addCloseButton: true });
     }
-
     renderRuleList(container = null) {
         const modalContent = container || document.querySelector('.popup_content .prose-polisher-navigator-content');
         if (!modalContent) return;
@@ -644,13 +684,12 @@ class RegexNavigator {
             item.dataset.id = rule.id;
             item.innerHTML = `<div class="item-icon"><i class="fa-solid ${rule.isStatic ? 'fa-database' : 'fa-wand-magic-sparkles'}"></i></div><div class="item-details"><div class="script-name">${rule.scriptName || '(No Name)'}</div><div class="find-regex">${rule.findRegex}</div></div><div class="item-status">${rule.isStatic ? '<span>Static</span>' : '<span>Dynamic</span>'}<i class="fa-solid ${rule.disabled ? 'fa-toggle-off' : 'fa-toggle-on'} status-toggle-icon" title="Toggle Enable/Disable"></i></div>`;
             item.addEventListener('pointerup', (e) => {
-                if (e.target.closest('.status-toggle-icon')) { this.toggleRuleStatus(rule.id); } 
+                if (e.target.closest('.status-toggle-icon')) { this.toggleRuleStatus(rule.id); }
                 else { this.openRuleEditor(rule.id); }
             });
             listView.appendChild(item);
         }
     }
-    
     async toggleRuleStatus(ruleId) {
         const rule = [...staticRules, ...dynamicRules].find(r => r.id === ruleId);
         if (rule) {
@@ -661,7 +700,6 @@ class RegexNavigator {
             toastr.success(`Rule "${rule.scriptName}" ${rule.disabled ? 'disabled' : 'enabled'}.`);
         }
     }
-
     async openRuleEditor(ruleId) {
         const isNew = ruleId === null;
         let rule;
@@ -709,7 +747,6 @@ class RegexNavigator {
             toastr.success(isNew ? "New rule created." : "Rule updated.");
         }
     }
-
     async handleDelete(ruleId) {
         const index = dynamicRules.findIndex(r => r.id === ruleId);
         if (index !== -1) {
@@ -732,10 +769,22 @@ async function initializeProsePolisher() {
         staticRules = await staticResponse.json();
         const settingsHtml = await fetch(`${EXTENSION_FOLDER_PATH}/settings.html`).then(res => res.text());
         document.getElementById('extensions_settings').insertAdjacentHTML('beforeend', settingsHtml);
-        const staticToggle = document.getElementById('prose_polisher_enable_static'), dynamicToggle = document.getElementById('prose_polisher_enable_dynamic'), triggerInput = document.getElementById('prose_polisher_dynamic_trigger'), navigatorBtn = document.getElementById('prose_polisher_open_navigator_button'), clearFreqBtn = document.getElementById('prose_polisher_clear_frequency_button'), analyzeChatBtn = document.getElementById('prose_polisher_analyze_chat_button'), viewFreqBtn = document.getElementById('prose_polisher_view_frequency_button'), generateRulesBtn = document.getElementById('prose_polisher_generate_rules_button'), manageBlacklistBtn = document.getElementById('prose_polisher_manage_blacklist_button'); // NEW: Get blacklist button
+        
+        const staticToggle = document.getElementById('prose_polisher_enable_static');
+        const dynamicToggle = document.getElementById('prose_polisher_enable_dynamic');
+        const triggerInput = document.getElementById('prose_polisher_dynamic_trigger');
+        const navigatorBtn = document.getElementById('prose_polisher_open_navigator_button');
+        const clearFreqBtn = document.getElementById('prose_polisher_clear_frequency_button');
+        const analyzeChatBtn = document.getElementById('prose_polisher_analyze_chat_button');
+        const viewFreqBtn = document.getElementById('prose_polisher_view_frequency_button');
+        const generateRulesBtn = document.getElementById('prose_polisher_generate_rules_button');
+        const manageWhitelistBtn = document.getElementById('prose_polisher_manage_whitelist_button');
+        const manageBlacklistBtn = document.getElementById('prose_polisher_manage_blacklist_button');
+        
         staticToggle.checked = extension_settings[EXTENSION_NAME].isStaticEnabled;
         dynamicToggle.checked = extension_settings[EXTENSION_NAME].isDynamicEnabled;
         triggerInput.value = extension_settings[EXTENSION_NAME].dynamicTriggerCount;
+        
         staticToggle.addEventListener('change', async () => { extension_settings[EXTENSION_NAME].isStaticEnabled = staticToggle.checked; await updateGlobalRegexArray(); });
         dynamicToggle.addEventListener('change', async () => { extension_settings[EXTENSION_NAME].isDynamicEnabled = dynamicToggle.checked; if(!dynamicToggle.checked) messageCounterForTrigger = 0; await updateGlobalRegexArray(); });
         triggerInput.addEventListener('input', () => { const value = parseInt(triggerInput.value, 10); if (!isNaN(value) && value >= 1) { extension_settings[EXTENSION_NAME].dynamicTriggerCount = value; saveSettingsDebounced(); } });
@@ -746,7 +795,8 @@ async function initializeProsePolisher() {
         analyzeChatBtn.addEventListener('pointerup', manualAnalyzeChatHistory);
         viewFreqBtn.addEventListener('pointerup', showFrequencyLeaderboard);
         generateRulesBtn.addEventListener('pointerup', handleGenerateRulesFromAnalysisClick);
-        manageBlacklistBtn.addEventListener('pointerup', showBlacklistManager); // NEW: Add event listener
+        manageWhitelistBtn.addEventListener('pointerup', showWhitelistManager);
+        manageBlacklistBtn.addEventListener('pointerup', showBlacklistManager);
         clearFreqBtn.addEventListener('pointerup', () => { ngramFrequencies.clear(); slopCandidates.clear(); messageCounterForTrigger = 0; totalAiMessagesProcessed = 0; analyzedLeaderboardData = { merged: [], remaining: [] }; toastr.success("Prose Polisher frequency data cleared!"); });
 
         eventSource.on(event_types.MESSAGE_SENT, handleMessageSent);
