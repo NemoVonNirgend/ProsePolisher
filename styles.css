@@ -1,140 +1,131 @@
---- START OF FILE styles.css ---
+/* C:\SillyTavern\public\scripts\extensions\third-party\ProsePolisher\styles.css */
 
-/* --- CSS Variables --- */
-:root {
-    --nemo-primary-accent: var(--primary-accent, #ff8c00);
-    --nemo-secondary-accent: var(--secondary-accent, #ffc107);
-    --nemo-primary-bg: var(--secondary-bg, #2c2f33);
-    --nemo-secondary-bg: var(--main-bg, #232528);
-    --nemo-tertiary-bg: var(--tertiary-bg, #36393f);
-    --nemo-item-hover-bg: var(--tertiary-bg-with-hover, #40444b);
-    --nemo-text-color: var(--text-color, #dcddde);
-    --nemo-text-muted: var(--text-color-secondary, #b9bbbe);
-    --nemo-border-color: var(--border-color, #444);
-    --nemo-shadow-color: rgba(0, 0, 0, 0.3);
-    --nemo-glow-color: var(--secondary-accent-glow, rgba(255, 193, 7, 0.7));
-}
-
-/* --- Settings Panel --- */
+/* --- ORIGINAL STYLES (Placeholders as per prompt) --- */
+:root { /* Original root variables can be placed here */ }
 .prose-polisher-settings .inline-drawer-content small {
     display: block;
-    margin-top: 5px;
-    color: var(--nemo-text-muted);
+    margin-top: 2px;
+    color: var(--text_color_dim);
 }
 .prose-polisher-settings .menu_button {
-    touch-action: manipulation;
+    margin: 5px 0;
 }
-
-/* --- PROSE POLISHER REGEX NAVIGATOR (MODIFIED FOR POPUP COMPATIBILITY) --- */
-
-/* This is the main container we pass to the popup. It should fill the available space. */
-.prose-polisher-navigator-content {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    width: 100%;
-    background-color: var(--nemo-primary-bg);
-    color: var(--nemo-text-color);
-}
-
-.prose-polisher-navigator-content .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--nemo-border-color); padding-bottom: 10px; margin-bottom: 15px; flex-shrink: 0; }
-.prose-polisher-navigator-content .modal-header h2 { margin: 0; color: var(--nemo-primary-accent); }
-/* We no longer need a custom close button style, as we use the popup's default. */
-
-.prose-polisher-navigator-content .navigator-body { display: flex; flex-grow: 1; overflow: hidden; }
-.prose-polisher-navigator-content .navigator-main-panel { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--nemo-secondary-bg); padding: 15px; border-radius: 8px; overflow: hidden; }
-#regex-navigator-list-view { overflow-y: auto; flex-grow: 1; padding: 10px; display: flex; flex-direction: column; gap: 5px; -webkit-overflow-scrolling: touch; }
-.regex-navigator-item { display: flex; align-items: center; padding: 8px 12px; background-color: var(--nemo-tertiary-bg); border-radius: 6px; cursor: pointer; border: 2px solid transparent; transition: all 0.2s ease; touch-action: manipulation; }
-.regex-navigator-item:hover { background-color: var(--nemo-item-hover-bg); border-color: #555; }
-.regex-navigator-item.is-dynamic { border-left: 4px solid var(--nemo-secondary-accent); }
-.regex-navigator-item.is-disabled { opacity: 0.6; }
-.regex-navigator-item.is-disabled .item-details .script-name { text-decoration: line-through; }
-.regex-navigator-item .item-icon { font-size: 1.2em; margin-right: 15px; color: var(--nemo-primary-accent); width: 20px; text-align: center; }
-.regex-navigator-item .item-details { flex-grow: 1; min-width: 0; }
-.regex-navigator-item .item-details .script-name { font-weight: bold; }
-.regex-navigator-item .item-details .find-regex { font-family: 'Courier New', monospace; font-size: 0.9em; color: var(--nemo-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.regex-navigator-item .item-status { margin-left: auto; padding-left: 15px; display: flex; align-items: center; gap: 10px; }
-.prose-polisher-navigator-content .modal-footer { border-top: 1px solid var(--nemo-border-color); padding-top: 15px; margin-top: 15px; display: flex; justify-content: flex-end; align-items: center; flex-shrink: 0; }
-.regex-navigator-item .status-toggle-icon { cursor: pointer; }
-
-@keyframes pulse-glow { 0% { box-shadow: 0 0 5px var(--nemo-glow-color), 0 0 10px var(--nemo-glow-color); } 50% { box-shadow: 0 0 10px var(--nemo-glow-color), 0 0 20px var(--nemo-glow-color); } 100% { box-shadow: 0 0 5px var(--nemo-glow-color), 0 0 10px var(--nemo-glow-color); } }
-.regex-navigator-item.is-newly-added { border-color: var(--nemo-secondary-accent); animation: pulse-glow 2s infinite ease-in-out; }
-
-/* Rule Editor & Frequency Table Popups */
-.prose-polisher-rule-editor-popup { display: flex; flex-direction: column; gap: 15px; width: 100%; }
-.prose-polisher-rule-editor-popup label { font-weight: bold; margin-bottom: -10px; }
-.prose-polisher-rule-editor-popup .text_pole, .prose-polisher-rule-editor-popup textarea { width: 100%; box-sizing: border-box; }
-.prose-polisher-rule-editor-popup textarea { resize: vertical; min-height: 80px; font-family: 'Courier New', monospace; }
-.prose-polisher-rule-editor-popup .editor-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
-.prose-polisher-rule-editor-popup .editor-actions .actions-left { display: flex; gap: 10px; }
-.prose-polisher-frequency-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-.prose-polisher-frequency-table th, .prose-polisher-frequency-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--nemo-border-color); }
-.prose-polisher-frequency-table th { background-color: var(--nemo-tertiary-bg); color: var(--nemo-primary-accent); }
-.prose-polisher-frequency-table td:last-child { text-align: center; font-weight: bold; font-size: 1.1em; }
-
-/* Style for detected patterns in frequency table */
-.prose-polisher-frequency-table tr.is-pattern td:first-child {
-    font-weight: bold;
-    color: var(--nemo-secondary-accent);
-}
-
-/* Styles for Whitelist & Blacklist Manager Popups */
-.prose-polisher-whitelist-manager,
-.prose-polisher-blacklist-manager {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-}
-.prose-polisher-whitelist-manager h4,
-.prose-polisher-blacklist-manager h4 {
-    margin: 0;
-    color: var(--nemo-primary-accent);
-    border-bottom: 1px solid var(--nemo-border-color);
-    padding-bottom: 8px;
-}
-.prose-polisher-whitelist-manager .list-container,
-.prose-polisher-blacklist-manager .list-container {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    max-height: 250px;
-    overflow-y: auto;
-    background-color: var(--nemo-secondary-bg);
-    border: 1px solid var(--nemo-border-color);
-    border-radius: 5px;
-    padding: 5px;
-}
-.prose-polisher-whitelist-manager .list-item,
-.prose-polisher-blacklist-manager .list-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 12px;
-    background-color: var(--nemo-tertiary-bg);
-    border-radius: 4px;
-    margin-bottom: 5px;
-}
-.prose-polisher-whitelist-manager .list-item:last-child,
-.prose-polisher-blacklist-manager .list-item:last-child {
-    margin-bottom: 0;
-}
-.prose-polisher-whitelist-manager .delete-btn,
-.prose-polisher-blacklist-manager .delete-btn {
-    cursor: pointer;
-    color: var(--nemo-text-muted);
-    transition: color 0.2s ease;
-}
-.prose-polisher-whitelist-manager .delete-btn:hover,
-.prose-polisher-blacklist-manager .delete-btn:hover {
-    color: #f04747; /* Danger red */
-}
-.prose-polisher-whitelist-manager .add-controls,
-.prose-polisher-blacklist-manager .add-controls {
-    display: flex;
-    gap: 10px;
-    margin-top: 5px;
-}
+.prose-polisher-navigator-content {}
+.prose-polisher-navigator-content .modal-header {}
 .prose-polisher-whitelist-manager .add-controls .text_pole,
 .prose-polisher-blacklist-manager .add-controls .text_pole {
     flex-grow: 1;
+}
+
+
+/* --- NEWLY ADDED & REFACTORED STYLES FOR PROJECT GREMLIN --- */
+
+/* Gremlin Toggle Button in Chat Input */
+#pp_gremlin_toggle {
+    margin-left: 10px;
+    font-size: 1.2em;
+    padding: 5px 10px;
+    background-color: var(--nemo-color-bg-dark-gray, #222);
+    border: 1px solid var(--nemo-border-color, #444);
+    color: var(--nemo-text-muted, #999);
+    transition: all 0.2s ease-in-out;
+}
+#pp_gremlin_toggle.active {
+    color: white;
+    background-color: var(--nemo-primary-accent, #6a3d9a);
+    border-color: var(--nemo-primary-accent, #6a3d9a);
+    box-shadow: 0 0 10px var(--nemo-primary-accent, #6a3d9a);
+}
+
+/* Gremlin Role Configuration Block */
+.pp-gremlin-role-config {
+    margin-bottom: 15px;
+    padding: 10px;
+    background-color: var(--nemo-secondary-bg, #2a2a2a);
+    border-radius: 6px;
+    border: 1px solid var(--nemo-border-color, #444);
+}
+
+.pp-gremlin-role-config > label {
+    font-weight: bold;
+    display: block;
+    margin-bottom: 5px;
+}
+
+.pp-api-display {
+    font-weight: normal;
+    font-size: 0.9em;
+    color: var(--nemo-text-muted, #999);
+    background-color: var(--nemo-tertiary-bg, #1e1e1e);
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 5px;
+    display: inline-block;
+    max-width: 250px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+}
+
+.pp-controls-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.pp-controls-wrapper > .text_pole, .pp-controls-wrapper > select {
+    flex-grow: 1;
+}
+.pp-controls-wrapper > .menu_button {
+    flex-shrink: 0;
+}
+
+
+/* Gremlin PRESET NAVIGATOR MODAL (Simplified) */
+#pp-preset-navigator-modal {
+    display: none; position: fixed; z-index: 9999; inset: 0; overflow: auto;
+    background-color: rgba(0,0,0,0.6); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);
+    align-items: center; justify-content: center;
+}
+#pp-preset-navigator-modal .modal-content {
+    color: var(--nemo-text-color, #fff); background: var(--nemo-primary-bg, #222); padding: 20px; border: 1px solid var(--nemo-border-color, #444);
+    width: 90%; max-width: 1200px; height: 80vh; display: flex; flex-direction: column;
+    border-radius: 12px; box-shadow: 0 8px 32px var(--nemo-shadow-color, rgba(0,0,0,0.5));
+}
+#pp-preset-navigator-modal .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--nemo-border-color, #444); padding-bottom: 10px; margin-bottom: 15px; flex-shrink: 0; }
+#pp-preset-navigator-modal .modal-header h2 { margin: 0; color: var(--nemo-primary-accent, #6a3d9a); }
+#pp-preset-navigator-modal .close-button { color: var(--nemo-text-muted, #999); font-size: 28px; font-weight: bold; cursor: pointer; transition: color 0.2s, transform 0.2s; }
+#pp-preset-navigator-modal .close-button:hover { color: #fff; transform: scale(1.1); }
+#pp-preset-navigator-modal .navigator-body { display: flex; flex-grow: 1; overflow: hidden; }
+#pp-preset-navigator-modal .navigator-main-panel { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--nemo-secondary-bg, #2a2a2a); padding: 15px; border-radius: 8px; }
+#navigator-grid-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--nemo-border-color, #444); flex-shrink: 0; gap: 20px; }
+#navigator-breadcrumbs { font-size: 1.1em; color: var(--nemo-text-color, #fff); }
+#navigator-breadcrumbs .link { color: var(--nemo-secondary-accent, #b592e0); cursor: pointer; }
+#navigator-header-controls { display: flex; align-items: center; gap: 15px; }
+#navigator-search-controls { display: flex; align-items: center; position: relative; }
+#navigator-search-input { width: 220px; padding-right: 30px; }
+#navigator-search-clear { position: absolute; right: 0; top: 0; bottom: 0; background: transparent; border: none; cursor: pointer; color: var(--nemo-text-muted, #999); padding: 0 10px; }
+#navigator-grid-view { overflow-y: auto; flex-grow: 1; padding: 10px; }
+.navigator-empty-state { text-align: center; color: var(--nemo-text-muted, #999); padding: 40px; }
+.view-mode-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 20px; }
+.grid-item { min-height: 160px; background-color: var(--nemo-tertiary-bg, #1e1e1e); border-radius: 8px; border: 2px solid transparent; display: flex; flex-direction: column; cursor: pointer; transition: all 0.2s ease-in-out; }
+.grid-item:hover { transform: translateY(-4px); box-shadow: 0 6px 12px var(--nemo-shadow-color, rgba(0,0,0,0.4)); border-color: #555; }
+.grid-item.selected { border-color: var(--nemo-primary-accent, #6a3d9a); background-color: var(--nemo-item-hover-bg, #333); animation: pulse-glow 2s infinite ease-in-out; }
+.grid-item .item-icon { height: 100px; display: flex; justify-content: center; align-items: center; font-size: 3.5em; background-size: cover; background-position: center; position: relative; }
+.grid-item.folder .item-icon { color: var(--nemo-secondary-accent, #b592e0); }
+.grid-item.preset .item-icon { color: #8ea9e8; }
+.grid-item .item-name { flex-grow: 1; padding: 8px; text-align: center; font-size: 0.9em; background-color: rgba(0,0,0,0.2); word-break: break-word; }
+#pp-preset-navigator-modal .modal-footer { border-top: 1px solid var(--nemo-border-color, #444); padding-top: 15px; margin-top: 15px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+
+/* API Binding Popup Content Styles */
+.pp-suggestion-list { list-style: none; padding: 0; margin: 10px 0; max-height: 200px; overflow-y: auto; background: var(--nemo-secondary-bg, #2a2a2a); border: 1px solid var(--nemo-border-color, #444); border-radius: 5px; }
+.pp-suggestion-item { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--nemo-border-color, #444); }
+.pp-suggestion-item:last-child { border-bottom: none; }
+.pp-suggestion-item:hover { background-color: var(--nemo-item-hover-bg, #333); }
+.pp-custom-binding-inputs { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+
+@keyframes pulse-glow {
+    0% { box-shadow: 0 0 5px rgba(106, 61, 154, 0.2); }
+    50% { box-shadow: 0 0 15px rgba(106, 61, 154, 0.7); }
+    100% { box-shadow: 0 0 5px rgba(106, 61, 154, 0.2); }
 }

@@ -1,21 +1,19 @@
-import {
-    saveSettingsDebounced,
-    eventSource,
-    event_types,
-    reloadCurrentChat,
-} from '../../../../script.js';
-import {
-    extension_settings,
-    getContext,
-} from '../../../extensions.js';
+// C:\SillyTavern\public\scripts\extensions\third-party\ProsePolisher\content.js
+import { eventSource, event_types } from '../../../../script.js';
+import { extension_settings, getContext } from '../../../extensions.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
+import { openai_setting_names } from '../../../../scripts/openai.js';
+// Import Generate is NOT needed anymore as we don't re-trigger generation
+
+// Local module imports
+import { PresetNavigator, injectNavigatorModal } from './navigator.js';
+import { runGremlinPlanningPipeline, applyGremlinEnvironment, executeGen } from './projectgremlin.js';
 
 // 1. CONFIGURATION AND STATE
 // -----------------------------------------------------------------------------
-const LOG_PREFIX = `[ProsePolisher]`;
-const EXTENSION_NAME = "ProsePolisher";
+export const EXTENSION_NAME = "ProsePolisher";
+const LOG_PREFIX = `[${EXTENSION_NAME}]`;
 const EXTENSION_FOLDER_PATH = `scripts/extensions/third-party/${EXTENSION_NAME}`;
-const PROSE_POLISHER_ID_PREFIX = '_prosePolisherRule_';
 const SLOP_THRESHOLD = 3;
 const BATCH_SIZE = 5;
 const MANUAL_ANALYSIS_CHUNK_SIZE = 20;
@@ -37,8 +35,47 @@ let isProcessingAiRules = false;
 let isAnalyzingHistory = false;
 let regexNavigator;
 let slopCandidates = new Set();
-let compiledActiveRules = [];
 let analyzedLeaderboardData = { merged: [], remaining: [] };
+let isPipelineRunning = false; // Flag to prevent recursive triggering
+let isAppReady = false; // Flag to indicate if SillyTavern APP_READY event has fired
+let readyQueue = []; // Queue for functions to run after APP_READY
+
+const SUGGESTED_MODELS = {
+    papa: [
+        { name: "Claude 4.0 Opus (Anthropic API)", api: "claude", model: "claude-4.0-opus-20240627" },
+        { name: "Gemini 2.5 Pro (Google API)", api: "google", model: "gemini-2.5-pro" },
+        { name: "DeepSeek Reasoning R1 (DeepSeek API)", api: "openai", source: "DeepSeek", model: "deepseek-r1-reasoning-20240615" },
+        { name: "GPT-4o (OpenAI API)", api: "openai", model: "gpt-4o" },
+    ],
+    twins: [
+        { name: "Claude 3.7 Haiku (Anthropic API)", api: "claude", model: "claude-3.7-haiku-20240627" },
+        { name: "Gemini 2.5 Flash Lite (Google API)", api: "google", model: "gemini-2.5-flash-lite-preview-06-17" },
+        { name: "Llama 3.1 8B (Free / OpenRouter)", api: "openrouter", model: "meta-llama/llama-3.1-8b-instruct:free" },
+        { name: "Gemma 3 4B (Free / OpenRouter)", api: "openrouter", model: "google/gemma-3-4b-it:free" },
+    ],
+    mama: [
+        { name: "Claude 3.7 Sonnet (Anthropic API)", api: "claude", model: "claude-3.7-sonnet" },
+        { name: "Gemini 2.5 Flash (Google API)", api: "google", model: "gemini-2.5-flash" },
+        { name: "DeepSeek R1 (Free / OpenRouter)", api: "openrouter", model: "deepseek/deepseek-r1-0528:free" },
+        { name: "GPT-4o Mini (OpenAI API)", api: "openai", model: "gpt-4o-mini" },
+    ],
+    writer: [
+        { name: "Claude 4.0 Opus (Anthropic API)", api: "claude", model: "claude-4.0-opus-20240627" },
+        { name: "Nous Hermes 3 405B (OpenRouter)", api: "openrouter", model: "nousresearch/hermes-3-llama-3.1-405b" },
+        { name: "Qwen3 235B A22B (Free / OpenRouter)", api: "openrouter", model: "qwen/qwen3-235b-a22b:free" },
+        { name: "WizardLM-2 8x22B (OpenRouter)", api: "openrouter", model: "microsoft/wizardlm-2-8x22b" },
+        { name: "Gemma 3 27B (Free / OpenRouter)", api: "openrouter", model: "google/gemma-3-27b-it:free" },
+        { name: "DeepSeek R1 (Free / OpenRouter)", api: "openrouter", model: "deepseek/deepseek-r1-0528:free" },
+        { name: "DeepSeek R1T Chimera (Free / OpenRouter)", api: "openrouter", model: "tngtech/deepseek-r1t-chimera:free" },
+        { name: "QwQ 32B RPR (Free / OpenRouter)", api: "openrouter", model: "arliai/qwq-32b-arliai-rpr-v1:free" },
+        { name: "Mistral Nemo (Free / OpenRouter)", api: "openrouter", model: "mistralai/mistral-nemo:free" },
+    ],
+    auditor: [
+        { name: "Claude 4.0 Opus (Anthropic API)", api: "claude", model: "claude-4.0-opus-20240627" },
+        { name: "Gemini 2.5 Pro (Google API)", api: "google", model: "gemini-2.5-pro" },
+        { name: "GPT-4o (OpenAI API)", api: "openai", model: "gpt-4o" },
+    ],
+};
 
 const defaultSettings = {
     isStaticEnabled: true,
@@ -47,9 +84,34 @@ const defaultSettings = {
     dynamicRules: [],
     whitelist: ["the", "and", "is", "a", "it", "in", "of", "to", "was", "for", "on", "with"],
     blacklist: [],
+    projectGremlinEnabled: false,
+    gremlinPapaEnabled: true,
+    gremlinTwinsEnabled: true,
+    gremlinMamaEnabled: true,
+    gremlinAuditorEnabled: false,
+    gremlinPapaPreset: 'Default',
+    gremlinPapaApi: 'claude',
+    gremlinPapaModel: 'claude-4.0-opus-20240627',
+    gremlinPapaSource: '',
+    gremlinTwinsPreset: 'Default',
+    gremlinTwinsApi: 'google',
+    gremlinTwinsModel: 'gemini-2.5-flash-lite-preview-06-17',
+    gremlinTwinsSource: '',
+    gremlinMamaPreset: 'Default',
+    gremlinMamaApi: 'claude',
+    gremlinMamaModel: 'claude-3.7-sonnet',
+    gremlinMamaSource: '',
+    gremlinWriterPreset: 'Default',
+    gremlinWriterApi: 'openrouter',
+    gremlinWriterModel: 'nousresearch/hermes-3-llama-3.1-405b',
+    gremlinWriterSource: '',
+    gremlinAuditorPreset: 'Default',
+    gremlinAuditorApi: 'openai',
+    gremlinAuditorModel: 'gpt-4o',
+    gremlinAuditorSource: '',
 };
 
-// 2. HELPER FUNCTIONS
+// 2. HELPER FUNCTIONS (Prose Polisher)
 // -----------------------------------------------------------------------------
 function generateNgrams(text, n) {
     const words = text.replace(/[.,!?]/g, '').toLowerCase().split(/\s+/).filter(w => w);
@@ -61,16 +123,32 @@ function generateNgrams(text, n) {
 }
 
 function stripMarkup(text) {
+    if (!text) return '';
     let cleanText = text.replace(/<(info_panel|memo|code|pre|script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
     cleanText = cleanText.replace(/<[^>]*>/g, ' ');
     return cleanText;
 }
 
+function getActiveRules() {
+    const settings = extension_settings[EXTENSION_NAME];
+    const rules = [];
+    if (settings.isStaticEnabled) {
+        rules.push(...staticRules.filter(r => !r.disabled));
+    }
+    if (settings.isDynamicEnabled) {
+        rules.push(...dynamicRules.filter(r => !r.disabled));
+    }
+    return rules;
+}
+
 function isPhraseHandledByRegex(phrase) {
-    for (const compiledRule of compiledActiveRules) {
-        if (compiledRule.test(phrase)) {
-            return true;
-        }
+    const activeRules = getActiveRules();
+    for (const rule of activeRules) {
+        try {
+            if (new RegExp(rule.findRegex, 'i').test(phrase)) {
+                return true;
+            }
+        } catch (e) { /* Ignore invalid regex during this check */ }
     }
     return false;
 }
@@ -112,7 +190,8 @@ function cullSubstrings(frequenciesObject) {
     return culledFrequencies;
 }
 
-// 3. CORE LOGIC & PATTERN FINDING
+
+// 3. CORE LOGIC & PATTERN FINDING (Prose Polisher)
 // -----------------------------------------------------------------------------
 function findAndMergePatterns(frequencies) {
     const culledFrequencies = cullSubstrings(frequencies);
@@ -188,7 +267,6 @@ function findAndMergePatterns(frequencies) {
     return { merged: mergedPatterns, remaining: remaining };
 }
 
-
 function performIntermediateAnalysis() {
     const allCandidates = [];
     for (const [phrase, data] of ngramFrequencies.entries()) {
@@ -213,39 +291,31 @@ function performIntermediateAnalysis() {
     };
 }
 
+function applyReplacements(text) {
+    if (!text) return text;
+    let replacedText = text;
+    const rulesToApply = getActiveRules();
 
-async function updateGlobalRegexArray() {
-    if (!extension_settings.regex) extension_settings.regex = [];
-    extension_settings.regex = extension_settings.regex.filter(rule => !rule.id?.startsWith(PROSE_POLISHER_ID_PREFIX));
-    const rulesToAdd = [];
-    const settings = extension_settings[EXTENSION_NAME];
-    if (settings.isStaticEnabled) rulesToAdd.push(...staticRules);
-    if (settings.isDynamicEnabled) rulesToAdd.push(...dynamicRules);
-    const activeRules = rulesToAdd.filter(rule => !rule.disabled);
-    for (const rule of activeRules) {
-        const globalRule = {
-            id: `${PROSE_POLISHER_ID_PREFIX}${rule.id}`,
-            scriptName: `(PP) ${rule.scriptName}`,
-            findRegex: rule.findRegex,
-            replaceString: rule.replaceString,
-            disabled: rule.disabled,
-            substituteRegex: 0,
-            minDepth: null,
-            maxDepth: null,
-            trimStrings: [],
-            placement: [2],
-            runOnEdit: false,
-            is_always_applied_to_display: true,
-            is_always_applied_to_prompt: true,
-        };
-        extension_settings.regex.push(globalRule);
-    }
-    compiledActiveRules = activeRules.map(rule => {
-        try { return new RegExp(rule.findRegex, 'i'); }
-        catch (error) { console.warn(`${LOG_PREFIX} Invalid regex in rule '${rule.scriptName}':`, error); return null; }
-    }).filter(Boolean);
-    console.log(`${LOG_PREFIX} Updated global regex array. ProsePolisher rules active: ${activeRules.length}.`);
-    saveSettingsDebounced();
+    rulesToApply.forEach(rule => {
+        try {
+            const regex = new RegExp(rule.findRegex, 'gi');
+            if (rule.replaceString.includes('{{random:')) {
+                const optionsMatch = rule.replaceString.match(/\{\{random:([\s\S]+?)\}\}/);
+                if (optionsMatch && optionsMatch[1]) {
+                    const options = optionsMatch[1].split(',');
+                    replacedText = replacedText.replace(regex, (match, ...args) => {
+                        const chosenOption = options[Math.floor(Math.random() * options.length)].trim();
+                        return chosenOption.replace(/\$(\d)/g, (_, index) => args[parseInt(index) - 1] || '');
+                    });
+                }
+            } else {
+                replacedText = replacedText.replace(regex, rule.replaceString);
+            }
+        } catch (e) {
+            console.warn(`${LOG_PREFIX} Invalid regex in rule '${rule.scriptName}', skipping:`, e);
+        }
+    });
+    return replacedText;
 }
 
 function processNewSlopCandidate(newPhrase) {
@@ -275,10 +345,9 @@ function analyzeAndTrackFrequency(text) {
                 const currentData = ngramFrequencies.get(ngram) || { count: 0 };
                 let newCount = currentData.count + 1;
 
-                // True Blacklist functionality: Boost the count for blacklisted phrases
                 if (isPhraseBlacklisted(ngram)) {
                     console.log(`${LOG_PREFIX} Applying blacklist boost to phrase: "${ngram}"`);
-                    newCount += SLOP_THRESHOLD; // Instantly mark it as a candidate
+                    newCount += SLOP_THRESHOLD;
                 }
 
                 ngramFrequencies.set(ngram, { count: newCount, lastSeenMessageIndex: totalAiMessagesProcessed });
@@ -336,11 +405,11 @@ ${JSON.stringify(exampleOutputStructure, null, 2)}
         }
         if (addedCount > 0) {
             extension_settings[EXTENSION_NAME].dynamicRules = dynamicRules;
-            await updateGlobalRegexArray();
+            window.saveSettingsDebounced();
         }
     } catch (error) {
         console.error(`${LOG_PREFIX} Error during dynamic rule generation:`, error);
-        toastr.error("Prose Polisher: AI rule generation failed or returned invalid data. See console.");
+        window.toastr.error("Prose Polisher: AI rule generation failed or returned invalid data. See console.");
     } finally {
         isProcessingAiRules = false;
         console.log(`${LOG_PREFIX} Dynamic rule generation finished. Added ${addedCount} rules.`);
@@ -353,17 +422,17 @@ async function checkForSlopAndGenerateRulesController() {
     const candidatesToProcess = Array.from(slopCandidates).slice(0, BATCH_SIZE);
     candidatesToProcess.forEach(candidate => slopCandidates.delete(candidate));
     if (candidatesToProcess.length > 0) {
-        toastr.info(`Prose Polisher: AI is generating rules for ${candidatesToProcess.length} slop phrases...`);
+        window.toastr.info(`Prose Polisher: AI is generating rules for ${candidatesToProcess.length} slop phrases...`);
         return await generateAndSaveDynamicRules(candidatesToProcess);
     }
     return 0;
 }
 
 async function manualAnalyzeChatHistory() {
-    if (isAnalyzingHistory) { toastr.warning("Prose Polisher: Chat history analysis is already in progress."); return; }
+    if (isAnalyzingHistory) { window.toastr.warning("Prose Polisher: Chat history analysis is already in progress."); return; }
     isAnalyzingHistory = true;
     let messagesSinceLastHeavyAnalysis = 0;
-    const toastrId = toastr.info(
+    const toastrId = window.toastr.info(
         'Prose Polisher: Starting analysis...<br><button id="pp-cancel-analysis" class="menu_button is_dangerous" style="margin-top: 10px;">Cancel Analysis</button>',
         "Analysis in Progress",
         { timeOut: 0, extendedTimeOut: 0, tapToDismiss: false, preventDuplicates: true }
@@ -371,8 +440,8 @@ async function manualAnalyzeChatHistory() {
     function cancelAnalysis() {
         if (!isAnalyzingHistory) return;
         isAnalyzingHistory = false;
-        toastr.clear(toastrId);
-        toastr.warning("Prose Polisher: Analysis cancelled by user.");
+        window.toastr.clear(toastrId);
+        window.toastr.warning("Prose Polisher: Analysis cancelled by user.");
     }
     if (toastrId) toastrId.find('#pp-cancel-analysis').on('click', cancelAnalysis);
 
@@ -381,12 +450,12 @@ async function manualAnalyzeChatHistory() {
     analyzedLeaderboardData = { merged: [], remaining: [] };
     totalAiMessagesProcessed = 0;
 
-    const context = getContext();
+    const context = window.getContext();
     const aiMessages = context?.chat?.filter(message => !message.is_user && message.mes) || [];
     if (aiMessages.length === 0) {
         isAnalyzingHistory = false;
-        if (toastrId) toastr.clear(toastrId);
-        toastr.info("Prose Polisher: No AI messages found in chat history to analyze.");
+        if (toastrId) window.toastr.clear(toastrId);
+        window.toastr.info("Prose Polisher: No AI messages found in chat history to analyze.");
         return;
     }
     let currentIndex = 0;
@@ -425,18 +494,18 @@ async function manualAnalyzeChatHistory() {
     }
     function completeAnalysis() {
         isAnalyzingHistory = false;
-        toastr.clear(toastrId);
-        if (slopCandidates.size > 0) toastr.success(`Prose Polisher: Analysis complete. ${slopCandidates.size} potential slop phrases identified.`);
-        else toastr.info("Prose Polisher: Analysis complete. No new slop candidates found meeting the threshold.");
+        window.toastr.clear(toastrId);
+        if (slopCandidates.size > 0) window.toastr.success(`Prose Polisher: Analysis complete. ${slopCandidates.size} potential slop phrases identified.`);
+        else window.toastr.info("Prose Polisher: Analysis complete. No new slop candidates found meeting the threshold.");
         showFrequencyLeaderboard();
     }
     processNextChunk();
 }
 
 async function handleGenerateRulesFromAnalysisClick() {
-    if (isProcessingAiRules) { toastr.warning("Prose Polisher: AI rule generation is already in progress."); return; }
-    if (slopCandidates.size === 0) { toastr.info("Prose Polisher: No slop candidates identified. Run analysis or wait for more messages."); return; }
-    toastr.info(`Prose Polisher: Starting AI rule generation for ${slopCandidates.size} candidate(s)...`);
+    if (isProcessingAiRules) { window.toastr.warning("Prose Polisher: AI rule generation is already in progress."); return; }
+    if (slopCandidates.size === 0) { window.toastr.info("Prose Polisher: No slop candidates identified. Run analysis or wait for more messages."); return; }
+    window.toastr.info(`Prose Polisher: Starting AI rule generation for ${slopCandidates.size} candidate(s)...`);
     let totalGeneratedThisRun = 0;
     const initialCandidateCount = slopCandidates.size;
     while (slopCandidates.size > 0) {
@@ -447,10 +516,10 @@ async function handleGenerateRulesFromAnalysisClick() {
         }
     }
     if (totalGeneratedThisRun > 0) {
-        toastr.success(`Prose Polisher: AI generated and saved ${totalGeneratedThisRun} new rule(s) from ${initialCandidateCount} candidates!`);
+        window.toastr.success(`Prose Polisher: AI generated and saved ${totalGeneratedThisRun} new rule(s) from ${initialCandidateCount} candidates!`);
         if (regexNavigator) regexNavigator.open();
     } else if (initialCandidateCount > 0) {
-        toastr.info("Prose Polisher: AI rule generation complete. No new rules were created (possibly AI filtered all candidates).");
+        window.toastr.info("Prose Polisher: AI rule generation complete. No new rules were created (possibly AI filtered all candidates).");
     }
 }
 
@@ -527,7 +596,7 @@ function showWhitelistManager() {
             item.innerHTML = `<span>${word}</span><i class="fa-solid fa-trash-can delete-btn" data-word="${word}"></i>`;
             item.querySelector('.delete-btn').addEventListener('click', () => {
                 settings.whitelist = settings.whitelist.filter(w => w !== word);
-                saveSettingsDebounced();
+                window.saveSettingsDebounced();
                 renderWhitelist();
             });
             listElement.appendChild(item);
@@ -538,7 +607,7 @@ function showWhitelistManager() {
         const newWord = inputElement.value.trim().toLowerCase();
         if (newWord && !settings.whitelist.includes(newWord)) {
             settings.whitelist.push(newWord);
-            saveSettingsDebounced();
+            window.saveSettingsDebounced();
             renderWhitelist();
             inputElement.value = '';
         }
@@ -579,7 +648,7 @@ function showBlacklistManager() {
             item.innerHTML = `<span>${word}</span><i class="fa-solid fa-trash-can delete-btn" data-word="${word}"></i>`;
             item.querySelector('.delete-btn').addEventListener('click', () => {
                 settings.blacklist = settings.blacklist.filter(w => w !== word);
-                saveSettingsDebounced();
+                window.saveSettingsDebounced();
                 renderBlacklist();
             });
             listElement.appendChild(item);
@@ -590,7 +659,7 @@ function showBlacklistManager() {
         const newWord = inputElement.value.trim().toLowerCase();
         if (newWord && !settings.blacklist.includes(newWord)) {
             settings.blacklist.push(newWord);
-            saveSettingsDebounced();
+            window.saveSettingsDebounced();
             renderBlacklist();
             inputElement.value = '';
         }
@@ -605,41 +674,250 @@ function showBlacklistManager() {
 }
 
 
-// 4. EVENT HANDLING & INITIALIZATION
+// 4. EVENT HANDLING & UI CLASSES
 // -----------------------------------------------------------------------------
+async function showApiEditorPopup(gremlinRole) {
+    const settings = extension_settings[EXTENSION_NAME];
+    const roleUpper = gremlinRole.charAt(0).toUpperCase() + gremlinRole.slice(1);
+    const suggestions = SUGGESTED_MODELS[gremlinRole] || [];
 
-function hideRulesInStandardUI() {
-    const regexListItems = document.querySelectorAll('#saved_regex_scripts .regex-script-label');
-    regexListItems.forEach(item => {
-        const scriptNameEl = item.querySelector('.regex_script_name');
-        if (scriptNameEl && scriptNameEl.textContent.startsWith('(PP)')) {
-            item.style.display = 'none';
-        }
+    const currentApi = settings[`gremlin${roleUpper}Api`] || '';
+    const currentModel = settings[`gremlin${roleUpper}Model`] || '';
+    const currentSource = settings[`gremlin${roleUpper}Source`] || '';
+
+    let suggestionsHtml = suggestions.length > 0 ? `<h4>Suggestions for ${roleUpper}</h4><ul class="pp-suggestion-list">${suggestions.map(s => `<li class="pp-suggestion-item" data-api="${s.api}" data-model="${s.model}" data-source="${s.source || ''}">${s.name}</li>`).join('')}</ul><hr>` : '';
+    const popupContent = document.createElement('div');
+    popupContent.innerHTML = `${suggestionsHtml}<h4>Custom API/Model</h4><div class="pp-custom-binding-inputs"><input type="text" id="pp_custom_api" class="text_pole" placeholder="API Name (e.g., openai, claude, google, openrouter)" value="${currentApi}"><input type="text" id="pp_custom_model" class="text_pole" placeholder="Exact Model Name (e.g., gpt-4o, claude-4.0-opus...)" value="${currentModel}"><input type="text" id="pp_custom_source" class="text_pole" placeholder="Source (for some OpenAI-compatibles, e.g. DeepSeek)" value="${currentSource}"></div><br><button id="pp-unbind-btn" class="menu_button is_dangerous">Clear All</button>`;
+
+    popupContent.querySelectorAll('.pp-suggestion-item').forEach(item => {
+        item.addEventListener('click', () => {
+            popupContent.querySelector('#pp_custom_api').value = item.dataset.api;
+            popupContent.querySelector('#pp_custom_model').value = item.dataset.model;
+            popupContent.querySelector('#pp_custom_source').value = item.dataset.source || '';
+            popupContent.querySelectorAll('.pp-suggestion-item').forEach(i => i.style.fontWeight = 'normal');
+            item.style.fontWeight = 'bold';
+        });
     });
+
+    popupContent.querySelector('#pp-unbind-btn').addEventListener('click', () => {
+         popupContent.querySelector('#pp_custom_api').value = '';
+         popupContent.querySelector('#pp_custom_model').value = '';
+         popupContent.querySelector('#pp_custom_source').value = '';
+         window.toastr.info('Cleared inputs. Click "Save" to apply.');
+    });
+
+    if (await callGenericPopup(popupContent, POPUP_TYPE.CONFIRM, `Set API/Model for ${roleUpper}`)) {
+        settings[`gremlin${roleUpper}Api`] = popupContent.querySelector('#pp_custom_api').value.trim();
+        settings[`gremlin${roleUpper}Model`] = popupContent.querySelector('#pp_custom_model').value.trim();
+        settings[`gremlin${roleUpper}Source`] = popupContent.querySelector('#pp_custom_source').value.trim();
+
+        window.saveSettingsDebounced();
+        updateGremlinApiDisplay(gremlinRole);
+        window.toastr.info(`API/Model settings saved for ${roleUpper}.`);
+    }
 }
 
-function handleSentenceCapitalization(messageElement) {
+function updateGremlinApiDisplay(role) {
+    const settings = extension_settings[EXTENSION_NAME];
+    const roleUpper = role.charAt(0).toUpperCase() + role.slice(1);
+    const displayElement = document.getElementById(`pp_gremlin${roleUpper}Display`);
+    if (displayElement) {
+        const api = settings[`gremlin${roleUpper}Api`] || 'None';
+        const model = settings[`gremlin${roleUpper}Model`] || 'Not Set';
+        displayElement.textContent = `${api} / ${model}`;
+    }
+}
+
+function handleSentenceCapitalization(messageId) {
+    const messageElement = document.querySelector(`#chat .mes[mesid="${messageId}"]`);
     if (!messageElement) return;
+
     const messageTextElement = messageElement.querySelector('.mes_text');
     if (!messageTextElement) return;
+
     let textContent = messageTextElement.innerHTML;
     const originalHTML = textContent;
+
     textContent = textContent.replace(/^(\s*<[^>]*>)*([a-z])/, (match, tags, letter) => `${tags || ''}${letter.toUpperCase()}`);
     textContent = textContent.replace(/([.!?])(\s*<[^>]*>)*\s+([a-z])/g, (match, punc, tags, letter) => `${punc}${tags || ''} ${letter.toUpperCase()}`);
+
     if (textContent !== originalHTML) {
         console.log(`${LOG_PREFIX} Applying enhanced auto-capitalization to a rendered message.`);
         messageTextElement.innerHTML = textContent;
     }
 }
 
-function handleMessageSent(data) {
-    if (data.is_user || !data.message) return;
+/**
+ * This handler prevents the original generation if the pipeline is starting,
+ * and allows internal pipeline /gen calls to proceed.
+ */
+async function onBeforeGeneration(type, generateArgsObject, dryRun) {
+    // If the pipeline is currently running (triggered by onUserMessageRendered),
+    // this check prevents the main generation process from starting immediately.
+    // Instead, it returns undefined to allow the internal /gen call to proceed.
+    if (isPipelineRunning) {
+         console.log('[ProjectGremlin] Pipeline running, allowing internal /gen call.');
+         // Return undefined to allow the internal /gen call to proceed.
+         return;
+    }
+
+    // For all other cases (Gremlin disabled, dry run, non-standard type),
+    // let SillyTavern handle them normally. Explicitly return undefined.
+    // This includes the final generation triggered by our pipeline.
+    return;
+}
+
+
+/**
+ * This is the main entry point for the Project Gremlin pipeline.
+ * It triggers *after* the user's message has been added to chat and rendered.
+ */
+async function onUserMessageRendered(messageId) {
+    const settings = extension_settings[EXTENSION_NAME];
+    const context = getContext();
+
+    // Log details for debugging every time the event fires
+    console.log(`[ProjectGremlin] USER_MESSAGE_RENDERED triggered for message ID ${messageId}`);
+    console.log(`[ProjectGremlin] Current chat length: ${context.chat.length}`);
+    console.log(`[ProjectGremlin] Project Gremlin Enabled: ${settings.projectGremlinEnabled}`);
+    console.log(`[ProjectGremlin] isPipelineRunning flag: ${isPipelineRunning}`);
+
+
+    // Simplified check: Ensure Gremlin is enabled and pipeline is not already running.
+    // We trust the event itself indicates it's the relevant user message and is in context.
+    if (!settings.projectGremlinEnabled || isPipelineRunning) {
+        console.log(`[ProjectGremlin] USER_MESSAGE_RENDERED condition failed for message ID ${messageId}. Details:`);
+        if (!settings.projectGremlinEnabled) console.log('[ProjectGremlin] - Reason: Project Gremlin is not enabled in settings.');
+        else if (isPipelineRunning) console.log('[ProjectGremlin] - Reason: Pipeline is already running.');
+        // Optional: log message details for info, but don't block on them
+        const message = context.chat.find(msg => msg.id === messageId);
+        console.log(`[ProjectGremlin] Message object found:`, message);
+        if (message && message.is_user !== true) console.log(`[ProjectGremlin] - Info: message.is_user is ${message.is_user}. (Not blocking)`);
+        if (message && message.id !== context.chat.length - 1) console.log(`[ProjectGremlin] - Info: Message ID (${messageId}) is not the latest chat message ID (${context.chat.length - 1}). (Not blocking)`);
+
+        return;
+    }
+
+    // If we pass the checks, the pipeline should start
+    console.log('[ProjectGremlin] User message rendered successfully. Starting pipeline...');
+
+    // Set the flag to indicate the pipeline is running.
+    isPipelineRunning = true;
+
+
+    try {
+        // Run the planning stages (Papa, Twins, Mama). They will see the user message in chat via /gen.
+        const finalBlueprint = await runGremlinPlanningPipeline();
+
+        if (!finalBlueprint) {
+            throw new Error('Project Gremlin planning failed.'); // Propagate error to trigger catch block
+        }
+
+        // --- Prepare Final Generation Environment and Prompt ---
+        let finalPromptInstruction;
+        if (settings.gremlinAuditorEnabled) {
+            // AUDITOR ENABLED: Run Writer internally, then prepare for Auditor.
+            console.log('[ProjectGremlin] Auditor enabled. Running Writer step internally...');
+            toastr.info("Gremlin Pipeline: Step 4 - Writer is crafting...", "Project Gremlin", { timeOut: 7000 });
+
+            // Set the environment for the internal Writer step.
+            await applyGremlinEnvironment('writer');
+            // The Writer's prompt includes the blueprint and sees the user message in chat via /gen
+            const writerInstruction = `[OOC: You are a master writer. Follow these instructions from your project lead precisely for your next response. Do not mention the blueprint or instructions in your reply. Your writing should be creative and engaging, bringing this plan to life. Do not write from the user's perspective. Write only the character's response.\n\n# INSTRUCTIONS\n${finalBlueprint}]`;
+            const writerProse = await executeGen(writerInstruction); // Execute Writer's generation
+
+            if (!writerProse.trim()) {
+                throw new Error("Internal Writer Gremlin step failed to produce a response.");
+            }
+            console.log('[ProjectGremlin] Writer Gremlin\'s Prose (for Auditor):', writerProse);
+
+            console.log('[ProjectGremlin] Preparing final injection for Auditor.');
+            toastr.info("Gremlin Pipeline: Handing off to Auditor...", "Project Gremlin", { timeOut: 4000 });
+
+            // Now, set the environment for the final Auditor step, which the main generation will use.
+            // This sets the API/Model/Preset for SillyTavern's core generation.
+            await applyGremlinEnvironment('auditor');
+
+            // Construct the final prompt *instruction* for the Auditor.
+             finalPromptInstruction = `[OOC: You are a master line editor. Your task is to revise and polish the following text.
+            - Correct any grammatical errors, awkward phrasing, or typos.
+            - Eliminate repetitive words and sentence structures.
+            - Enhance the prose to be more evocative and impactful, while respecting the established character voice and tone.
+            - If the text is fundamentally flawed or completely fails to follow the narrative, rewrite it from scratch to be high quality.
+            - **CRUCIAL:** Your output must ONLY be the final, edited text. Do NOT include any commentary, explanations, or introductory phrases like "Here is the revised version:".
+
+            # TEXT TO EDIT
+            ${writerProse}]`;
+
+        }
+        else {
+            // AUDITOR DISABLED: Writer is the final step. Prepare environment and construct prompt instruction for Writer.
+            console.log('[ProjectGremlin] Auditor disabled. Preparing final instruction for Writer.');
+            toastr.info("Gremlin Pipeline: Handing off to Writer...", "Project Gremlin", { timeOut: 4000 });
+
+            // Set the API/Preset environment for the Writer.
+            // This sets the API/Model/Preset for SillyTavern's core generation.
+            await applyGremlinEnvironment('writer');
+
+            // Construct the final prompt *instruction* for the Writer.
+             finalPromptInstruction = `[OOC: You are a master writer. Follow these instructions from your project lead precisely for your next response. Do not mention the blueprint or instructions in your reply. Your writing should be creative and engaging, bringing this plan to life. Do not write from the user's perspective. Write only the character's response.\n\n# INSTRUCTIONS\n${finalBlueprint}]`;
+        }
+
+        toastr.success("Gremlin Pipeline: Blueprint complete! Prompt modified for generation.", "Project Gremlin");
+
+        // Sanitize and inject the final instruction into the context for the upcoming generation.
+        // SillyTavern's core will build the final prompt using this injected text + chat history.
+        const sanitizedInstruction = finalPromptInstruction.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        await context.executeSlashCommands(`/inject id=gremlin_final_plan position=chat depth=0 "${sanitizedInstruction}"`);
+
+        // SillyTavern's core will automatically trigger the character generation now that
+        // the USER_MESSAGE_RENDERED handler has finished and the prompt is ready.
+        // We do NOT need to call Generate() here.
+
+    } catch (error) {
+        console.error('[ProjectGremlin] A critical error occurred during the pipeline execution:', error);
+        toastr.error(`Project Gremlin pipeline failed: ${error.message}. Generation may proceed without blueprint.`, "Project Gremlin Error");
+        // If the pipeline fails, SillyTavern's original generation might proceed without the injected prompt.
+    } finally {
+        // --- Cleanup ---
+        isPipelineRunning = false; // Unlock the pipeline flag
+
+        // Reload generation settings (API/Model/Preset) in case an intermediate step changed them
+        // This ensures settings are correct for subsequent user messages.
+        context.reloadGenerationSettings();
+    }
+}
+
+// This function ONLY handles post-generation processing on the AI's message.
+// This is still useful for regex replacements and frequency tracking.
+function onAiMessageRendered(messageId) {
+    const settings = extension_settings[EXTENSION_NAME];
+    const context = getContext();
+    const message = context.chat.find(msg => msg.id === messageId);
+
+    if (!message || message.is_user) return;
+
+    let processedMessage = message.mes;
+    const originalMessage = processedMessage;
+
+    processedMessage = applyReplacements(processedMessage);
+
+    if (processedMessage !== originalMessage) {
+        console.log(`${LOG_PREFIX} Applying regex replacements.`);
+        message.mes = processedMessage;
+        context.saveState();
+        // Update the DOM element directly if it exists
+        const messageTextElement = document.querySelector(`#chat .mes[mesid="${messageId}"] .mes_text`);
+        if(messageTextElement) messageTextElement.innerHTML = processedMessage;
+    }
+
     totalAiMessagesProcessed++;
-    analyzeAndTrackFrequency(data.message);
+    analyzeAndTrackFrequency(processedMessage);
+
     if (totalAiMessagesProcessed % PRUNE_CHECK_INTERVAL === 0) {
         pruneOldNgrams();
     }
-    const settings = extension_settings[EXTENSION_NAME];
+
     if (settings.isDynamicEnabled && slopCandidates.size > 0) {
         messageCounterForTrigger++;
         if (messageCounterForTrigger >= settings.dynamicTriggerCount) {
@@ -649,7 +927,10 @@ function handleMessageSent(data) {
     } else {
         messageCounterForTrigger = 0;
     }
+
+    handleSentenceCapitalization(messageId);
 }
+
 
 class RegexNavigator {
     constructor() {}
@@ -694,10 +975,12 @@ class RegexNavigator {
         const rule = [...staticRules, ...dynamicRules].find(r => r.id === ruleId);
         if (rule) {
             rule.disabled = !rule.disabled;
-            if (!rule.isStatic) { extension_settings[EXTENSION_NAME].dynamicRules = dynamicRules; }
+            if (!rule.isStatic) {
+                extension_settings[EXTENSION_NAME].dynamicRules = dynamicRules;
+                window.saveSettingsDebounced();
+            }
             this.renderRuleList();
-            await updateGlobalRegexArray();
-            toastr.success(`Rule "${rule.scriptName}" ${rule.disabled ? 'disabled' : 'enabled'}.`);
+            window.toastr.success(`Rule "${rule.scriptName}" ${rule.disabled ? 'disabled' : 'enabled'}.`);
         }
     }
     async openRuleEditor(ruleId) {
@@ -714,7 +997,7 @@ class RegexNavigator {
             <input type="text" id="pp_editor_name" class="text_pole" value="${rule.scriptName?.replace(/"/g, '"') || ''}" ${rule.isStatic ? 'disabled' : ''}>
             <label for="pp_editor_find">Find Regex (JavaScript format)</label>
             <textarea id="pp_editor_find" class="text_pole" ${rule.isStatic ? 'disabled' : ''}>${rule.findRegex || ''}</textarea>
-            <label for="pp_editor_replace">Replace String</label>
+            <label for="pp_editor_replace">Replace String (use {{random:opt1,opt2}} for variants)</label>
             <textarea id="pp_editor_replace" class="text_pole" ${rule.isStatic ? 'disabled' : ''}>${rule.replaceString || ''}</textarea>
             <div class="editor-actions">
                 <div class="actions-left"><label class="checkbox_label"><input type="checkbox" id="pp_editor_disabled" ${rule.disabled ? 'checked' : ''}><span>Disabled</span></label></div>
@@ -727,7 +1010,11 @@ class RegexNavigator {
                 const confirmed = await callGenericPopup('Are you sure you want to delete this rule?', POPUP_TYPE.CONFIRM);
                 if (confirmed) {
                     await this.handleDelete(rule.id);
-                    deleteBtn.closest('.popup_confirm')?.querySelector('.popup-button-cancel')?.click();
+                    const popup = deleteBtn.closest('.popup_confirm');
+                    if (popup) {
+                        const closeButton = popup.querySelector('.popup-close') || popup.querySelector('.popup-button-cancel');
+                        closeButton?.click();
+                    }
                 }
             });
         }
@@ -736,15 +1023,17 @@ class RegexNavigator {
             const nameInput = editorContent.querySelector('#pp_editor_name'), findInput = editorContent.querySelector('#pp_editor_find'), replaceInput = editorContent.querySelector('#pp_editor_replace'), disabledInput = editorContent.querySelector('#pp_editor_disabled');
             rule.disabled = disabledInput.checked;
             if (!rule.isStatic) {
-                if (!nameInput.value.trim() || !findInput.value.trim()) { toastr.error("Rule Name and Find Regex cannot be empty."); this.openRuleEditor(ruleId); return; }
-                try { new RegExp(findInput.value); } catch (e) { toastr.error(`Invalid Regex: ${e.message}`); this.openRuleEditor(ruleId); return; }
+                if (!nameInput.value.trim() || !findInput.value.trim()) { window.toastr.error("Rule Name and Find Regex cannot be empty."); this.openRuleEditor(ruleId); return; }
+                try { new RegExp(findInput.value); } catch (e) { window.toastr.error(`Invalid Regex: ${e.message}`); this.openRuleEditor(ruleId); return; }
                 rule.scriptName = nameInput.value; rule.findRegex = findInput.value; rule.replaceString = replaceInput.value;
             }
             if (isNew && !rule.isStatic) { dynamicRules.push(rule); }
-            if (!rule.isStatic) { extension_settings[EXTENSION_NAME].dynamicRules = dynamicRules; }
+            if (!rule.isStatic) {
+                extension_settings[EXTENSION_NAME].dynamicRules = dynamicRules;
+                window.saveSettingsDebounced();
+            }
             this.renderRuleList();
-            await updateGlobalRegexArray();
-            toastr.success(isNew ? "New rule created." : "Rule updated.");
+            window.toastr.success(isNew ? "New rule created." : "Rule updated.");
         }
     }
     async handleDelete(ruleId) {
@@ -752,70 +1041,193 @@ class RegexNavigator {
         if (index !== -1) {
             dynamicRules.splice(index, 1);
             extension_settings[EXTENSION_NAME].dynamicRules = dynamicRules;
+            window.saveSettingsDebounced();
             this.renderRuleList();
-            await updateGlobalRegexArray();
-            toastr.success("Dynamic rule deleted.");
+            window.toastr.success("Dynamic rule deleted.");
         }
     }
 }
 
-async function initializeProsePolisher() {
+// Function to execute tasks queued before APP_READY
+async function runReadyQueue() {
+    isAppReady = true;
+    console.log(`${LOG_PREFIX} APP_READY event received. Running queued tasks (${readyQueue.length}).`);
+    while (readyQueue.length > 0) {
+        const task = readyQueue.shift();
+        try {
+            await task();
+        } catch (error) {
+            console.error(`${LOG_PREFIX} Error running queued task:`, error);
+        }
+    }
+    console.log(`${LOG_PREFIX} Ready queue finished.`);
+}
+
+// Function to queue tasks that need APP_READY
+function queueReadyTask(task) {
+    if (isAppReady) {
+        // If APP_READY has already fired, execute immediately
+        task();
+    } else {
+        // Otherwise, add to the queue
+        readyQueue.push(task);
+    }
+}
+
+
+// 5. INITIALIZATION
+// -----------------------------------------------------------------------------
+async function initializeExtensionCore() {
     try {
-        console.log(`${LOG_PREFIX} Initializing...`);
+        console.log(`${LOG_PREFIX} Initializing core components...`);
         extension_settings[EXTENSION_NAME] = { ...defaultSettings, ...extension_settings[EXTENSION_NAME] };
-        dynamicRules = extension_settings[EXTENSION_NAME].dynamicRules || [];
+        const settings = extension_settings[EXTENSION_NAME];
+
+        dynamicRules = settings.dynamicRules || [];
         const staticResponse = await fetch(`${EXTENSION_FOLDER_PATH}/regex_rules.json`);
         if (!staticResponse.ok) throw new Error("Failed to fetch regex_rules.json");
         staticRules = await staticResponse.json();
+
         const settingsHtml = await fetch(`${EXTENSION_FOLDER_PATH}/settings.html`).then(res => res.text());
         document.getElementById('extensions_settings').insertAdjacentHTML('beforeend', settingsHtml);
-        
-        const staticToggle = document.getElementById('prose_polisher_enable_static');
-        const dynamicToggle = document.getElementById('prose_polisher_enable_dynamic');
-        const triggerInput = document.getElementById('prose_polisher_dynamic_trigger');
-        const navigatorBtn = document.getElementById('prose_polisher_open_navigator_button');
-        const clearFreqBtn = document.getElementById('prose_polisher_clear_frequency_button');
-        const analyzeChatBtn = document.getElementById('prose_polisher_analyze_chat_button');
-        const viewFreqBtn = document.getElementById('prose_polisher_view_frequency_button');
-        const generateRulesBtn = document.getElementById('prose_polisher_generate_rules_button');
-        const manageWhitelistBtn = document.getElementById('prose_polisher_manage_whitelist_button');
-        const manageBlacklistBtn = document.getElementById('prose_polisher_manage_blacklist_button');
-        
-        staticToggle.checked = extension_settings[EXTENSION_NAME].isStaticEnabled;
-        dynamicToggle.checked = extension_settings[EXTENSION_NAME].isDynamicEnabled;
-        triggerInput.value = extension_settings[EXTENSION_NAME].dynamicTriggerCount;
-        
-        staticToggle.addEventListener('change', async () => { extension_settings[EXTENSION_NAME].isStaticEnabled = staticToggle.checked; await updateGlobalRegexArray(); });
-        dynamicToggle.addEventListener('change', async () => { extension_settings[EXTENSION_NAME].isDynamicEnabled = dynamicToggle.checked; if(!dynamicToggle.checked) messageCounterForTrigger = 0; await updateGlobalRegexArray(); });
-        triggerInput.addEventListener('input', () => { const value = parseInt(triggerInput.value, 10); if (!isNaN(value) && value >= 1) { extension_settings[EXTENSION_NAME].dynamicTriggerCount = value; saveSettingsDebounced(); } });
-        
+
+        // ---- PROSE POLISHER UI BINDING ----
+        document.getElementById('prose_polisher_enable_static').checked = settings.isStaticEnabled;
+        document.getElementById('prose_polisher_enable_dynamic').checked = settings.isDynamicEnabled;
+        document.getElementById('prose_polisher_dynamic_trigger').value = settings.dynamicTriggerCount;
+
+        document.getElementById('prose_polisher_enable_static').addEventListener('change', (e) => { settings.isStaticEnabled = e.target.checked; window.saveSettingsDebounced(); });
+        document.getElementById('prose_polisher_enable_dynamic').addEventListener('change', (e) => { settings.isDynamicEnabled = e.target.checked; if(!e.target.checked) messageCounterForTrigger = 0; window.saveSettingsDebounced(); });
+        document.getElementById('prose_polisher_dynamic_trigger').addEventListener('input', (e) => { const value = parseInt(e.target.value, 10); if (!isNaN(value) && value >= 1) { settings.dynamicTriggerCount = value; window.saveSettingsDebounced(); } });
+
         regexNavigator = new RegexNavigator();
-        
-        navigatorBtn.addEventListener('pointerup', () => regexNavigator.open());
-        analyzeChatBtn.addEventListener('pointerup', manualAnalyzeChatHistory);
-        viewFreqBtn.addEventListener('pointerup', showFrequencyLeaderboard);
-        generateRulesBtn.addEventListener('pointerup', handleGenerateRulesFromAnalysisClick);
-        manageWhitelistBtn.addEventListener('pointerup', showWhitelistManager);
-        manageBlacklistBtn.addEventListener('pointerup', showBlacklistManager);
-        clearFreqBtn.addEventListener('pointerup', () => { ngramFrequencies.clear(); slopCandidates.clear(); messageCounterForTrigger = 0; totalAiMessagesProcessed = 0; analyzedLeaderboardData = { merged: [], remaining: [] }; toastr.success("Prose Polisher frequency data cleared!"); });
 
-        eventSource.on(event_types.MESSAGE_SENT, handleMessageSent);
-        eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, handleSentenceCapitalization);
+        document.getElementById('prose_polisher_open_navigator_button').addEventListener('pointerup', () => regexNavigator.open());
+        document.getElementById('prose_polisher_analyze_chat_button').addEventListener('pointerup', manualAnalyzeChatHistory);
+        document.getElementById('prose_polisher_view_frequency_button').addEventListener('pointerup', showFrequencyLeaderboard);
+        document.getElementById('prose_polisher_generate_rules_button').addEventListener('pointerup', handleGenerateRulesFromAnalysisClick);
+        document.getElementById('prose_polisher_manage_whitelist_button').addEventListener('pointerup', showWhitelistManager);
+        document.getElementById('prose_polisher_manage_blacklist_button').addEventListener('pointerup', showBlacklistManager);
+        document.getElementById('prose_polisher_clear_frequency_button').addEventListener('pointerup', () => { ngramFrequencies.clear(); slopCandidates.clear(); messageCounterForTrigger = 0; totalAiMessagesProcessed = 0; analyzedLeaderboardData = { merged: [], remaining: [] }; window.toastr.success("Prose Polisher frequency data cleared!"); });
 
-        const regexListContainer = document.getElementById('saved_regex_scripts');
-        if (regexListContainer) {
-            const observer = new MutationObserver(hideRulesInStandardUI);
-            observer.observe(regexListContainer, { childList: true });
-            hideRulesInStandardUI();
-        } else {
-            console.warn(`${LOG_PREFIX} Could not find regex list container #saved_regex_scripts to attach UI hider.`);
+        // ---- PROJECT GREMLIN UI BINDING ----
+        let buttonContainer = document.getElementById('pp-chat-buttons-container');
+        if (!buttonContainer) {
+            buttonContainer = document.createElement('div');
+            buttonContainer.id = 'pp-chat-buttons-container';
+            const sendButtonHolder = document.getElementById('send_but_holder');
+            sendButtonHolder?.parentElement?.insertBefore(buttonContainer, sendButtonHolder.nextSibling);
         }
 
-        await updateGlobalRegexArray();
-        console.log(`${LOG_PREFIX} Initialized successfully.`);
+        buttonContainer.insertAdjacentHTML('beforeend', `<button id="pp_gremlin_toggle" class="fa-solid fa-hat-wizard" title="Toggle Project Gremlin Pipeline"></button>`);
+
+        const gremlinToggle = document.getElementById('pp_gremlin_toggle');
+        const gremlinEnableCheckbox = document.getElementById('pp_projectGremlinEnabled');
+
+        const updateGremlinToggleState = () => {
+            const enabled = settings.projectGremlinEnabled;
+            gremlinToggle?.classList.toggle('active', enabled);
+            if (gremlinEnableCheckbox) gremlinEnableCheckbox.checked = enabled;
+        };
+
+        const toggleGremlin = () => {
+            settings.projectGremlinEnabled = !settings.projectGremlinEnabled;
+            window.saveSettingsDebounced();
+            updateGremlinToggleState();
+            window.toastr.info(`Project Gremlin ${settings.projectGremlinEnabled ? 'enabled' : 'disabled'} for next message.`);
+        };
+
+        gremlinToggle?.addEventListener('click', toggleGremlin);
+        gremlinEnableCheckbox?.addEventListener('change', (e) => {
+            if (settings.projectGremlinEnabled !== e.target.checked) {
+                 settings.projectGremlinEnabled = e.target.checked;
+                 window.saveSettingsDebounced();
+                 updateGremlinToggleState();
+            }
+        });
+
+        document.getElementById('pp_gremlinPapaEnabled').checked = settings.gremlinPapaEnabled;
+        document.getElementById('pp_gremlinTwinsEnabled').checked = settings.gremlinTwinsEnabled;
+        document.getElementById('pp_gremlinMamaEnabled').checked = settings.gremlinMamaEnabled;
+        document.getElementById('pp_gremlinAuditorEnabled').checked = settings.gremlinAuditorEnabled;
+
+        document.getElementById('pp_gremlinPapaEnabled').addEventListener('change', (e) => { settings.gremlinPapaEnabled = e.target.checked; window.saveSettingsDebounced(); });
+        document.getElementById('pp_gremlinTwinsEnabled').addEventListener('change', (e) => { settings.gremlinTwinsEnabled = e.target.checked; window.saveSettingsDebounced(); });
+        document.getElementById('pp_gremlinMamaEnabled').addEventListener('change', (e) => { settings.gremlinMamaEnabled = e.target.checked; window.saveSettingsDebounced(); });
+        document.getElementById('pp_gremlinAuditorEnabled').addEventListener('change', (e) => { settings.gremlinAuditorEnabled = e.target.checked; window.saveSettingsDebounced(); });
+
+        injectNavigatorModal();
+        const presetNavigator = new PresetNavigator();
+        presetNavigator.init();
+
+        // Wait for openai_setting_names to be populated before populating preset dropdowns
+        queueReadyTask(async () => {
+            await new Promise(resolve => {
+                // Poll for openai_setting_names to be available
+                const checkInterval = setInterval(() => {
+                    if (typeof openai_setting_names !== 'undefined' && Object.keys(openai_setting_names).length > 0) {
+                        clearInterval(checkInterval);
+                        resolve();
+                    }
+                }, 100); // Check every 100ms
+            });
+
+            const presetOptions = Object.keys(openai_setting_names).map(name => `<option value="${name}">${name}</option>`).join('');
+
+            ['papa', 'twins', 'mama', 'writer', 'auditor'].forEach(role => {
+                const roleUpper = role.charAt(0).toUpperCase() + role.slice(1);
+                const presetSelectId = `pp_gremlin${roleUpper}Preset`;
+                const presetSelect = document.getElementById(presetSelectId);
+                const browseBtn = document.querySelector(`.pp-browse-gremlin-preset-btn[data-target-select="${presetSelectId}"]`);
+                const apiBtn = document.querySelector(`.pp-select-api-btn[data-gremlin-role="${role}"]`);
+
+                if (presetSelect) {
+                    presetSelect.innerHTML = presetOptions;
+                    presetSelect.value = settings[`gremlin${roleUpper}Preset`] || 'Default';
+                    presetSelect.addEventListener('change', () => {
+                        settings[`gremlin${roleUpper}Preset`] = presetSelect.value;
+                        window.saveSettingsDebounced();
+                    });
+                }
+                if (browseBtn) browseBtn.addEventListener('click', () => presetNavigator.open(presetSelectId));
+                if (apiBtn) apiBtn.addEventListener('click', () => showApiEditorPopup(role));
+
+                updateGremlinApiDisplay(role);
+            });
+             updateGremlinToggleState(); // Update toggle state after UI is ready
+             console.log(`${LOG_PREFIX} Preset dropdowns populated.`);
+        });
+
+
+        // ---- INITIALIZE CORE LOGIC ----
+        // These event listeners should be bound relatively early, but after core ST events are set up.
+        // Binding them inside the APP_READY listener ensures this.
+        queueReadyTask(() => {
+             // This handler prevents the original generation if the pipeline is starting,
+            // and allows internal pipeline /gen calls to proceed.
+            eventSource.on(event_types.GENERATION_AFTER_COMMANDS, onBeforeGeneration);
+            // This is the primary trigger for the Gremlin pipeline, happening after user message is rendered.
+            // Using makeLast to ensure it runs after other core rendering logic.
+            eventSource.makeLast(event_types.USER_MESSAGE_RENDERED, onUserMessageRendered);
+            // This handler is for post-processing the AI's response after it's rendered.
+            eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onAiMessageRendered);
+            console.log(`${LOG_PREFIX} Core event listeners bound.`);
+        });
+
+
+        console.log(`${LOG_PREFIX} Core components initialized.`);
     } catch (error) {
-        console.error(`${LOG_PREFIX} Critical failure during initialization:`, error);
-        toastr.error("Prose Polisher failed to initialize. See console.");
+        console.error(`${LOG_PREFIX} Critical failure during core initialization:`, error);
+        window.toastr.error("Prose Polisher failed to initialize core components. See console.");
     }
 }
-$(document).ready(() => { setTimeout(initializeProsePolisher, 1500); });
+
+// Wait for the document to be ready, then start core initialization.
+// The APP_READY event listener will handle subsequent setup steps.
+$(document).ready(() => {
+    console.log(`${LOG_PREFIX} Document ready.`);
+    // Listen for the APP_READY event
+    eventSource.on(event_types.APP_READY, runReadyQueue);
+    // Start core initialization. Some parts will be queued until APP_READY.
+    initializeExtensionCore();
+});
