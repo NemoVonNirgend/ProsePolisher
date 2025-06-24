@@ -21,6 +21,12 @@
                     <span><b>Enable Dynamic AI Learning:</b> Automatically detects new slop and generates new regex rules based on message frequency.</span>
                 </label>
             </div>
+             <div class="form-group"> <!-- Added this from your previous context, assuming it was meant to be here -->
+                <label class="checkbox_label">
+                    <input type="checkbox" id="prose_polisher_enable_global_regex">
+                    <span><b>Integrate with Global Regex:</b> Add active ProsePolisher rules to ST's main regex list. (Recommended: ON)</span>
+                </label>
+            </div>
             <hr>
             <label for="prose_polisher_dynamic_trigger">Auto-Rule Gen Trigger (messages after new slop detected):</label>
             <input type="number" id="prose_polisher_dynamic_trigger" class="text_pole" min="5">
@@ -71,6 +77,7 @@
                     <select id="pp_gremlinPapaPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
                     <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinPapaPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
                     <button class="menu_button pp-select-api-btn" data-gremlin-role="papa" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
+                    <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="papa" title="Edit Papa Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
                 </div>
                 <small>High-intelligence model for initial blueprinting.</small>
             </div>
@@ -85,6 +92,7 @@
                     <select id="pp_gremlinTwinsPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
                     <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinTwinsPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
                     <button class="menu_button pp-select-api-btn" data-gremlin-role="twins" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
+                    <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="twins" title="Edit Twin Gremlins' Instructions"><i class="fa-solid fa-file-pen"></i></button>
                 </div>
                 <div style="margin-top: 8px;">
                     <label for="pp_gremlinTwinsIterations" style="margin-right: 5px; font-weight:normal; font-size: 0.9em;">Refinement Iterations (per Twin):</label>
@@ -108,6 +116,7 @@
                     <select id="pp_gremlinMamaPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
                     <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinMamaPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
                     <button class="menu_button pp-select-api-btn" data-gremlin-role="mama" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
+                    <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="mama" title="Edit Mama Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
                 </div>
                 <small>Balanced model for final blueprint synthesis.</small>
             </div>
@@ -119,6 +128,7 @@
                     <select id="pp_gremlinWriterPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
                     <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinWriterPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
                     <button class="menu_button pp-select-api-btn" data-gremlin-role="writer" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
+                    <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="writer" title="Edit Writer Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
                 </div>
                 <small>Creative model for writing the final response. (This step is always active)</small>
             </div>
@@ -133,6 +143,7 @@
                     <select id="pp_gremlinAuditorPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
                     <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinAuditorPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
                     <button class="menu_button pp-select-api-btn" data-gremlin-role="auditor" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
+                    <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="auditor" title="Edit Auditor Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
                 </div>
                 <small>Optional final line-editor to fix prose, repetition, and quality. Receives the writer's output and rewrites it before displaying.</small>
             </div>

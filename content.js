@@ -6,7 +6,14 @@ import { openai_setting_names } from '../../../../scripts/openai.js';
 
 // Local module imports
 import { PresetNavigator, injectNavigatorModal } from './navigator.js';
-import { runGremlinPlanningPipeline, applyGremlinEnvironment, executeGen } from './projectgremlin.js';
+import {
+    runGremlinPlanningPipeline, applyGremlinEnvironment, executeGen,
+    // Import default prompts from projectgremlin.js for UI consistency
+    DEFAULT_PAPA_INSTRUCTIONS as PG_DEFAULT_PAPA_INSTRUCTIONS,
+    DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE as PG_DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE,
+    DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE as PG_DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE,
+    DEFAULT_MAMA_INSTRUCTIONS as PG_DEFAULT_MAMA_INSTRUCTIONS
+} from './projectgremlin.js';
 import { Analyzer } from './analyzer.js';
 // commonWords and defaultNames are imported by analyzer.js, no need here directly
 
@@ -28,6 +35,10 @@ let prosePolisherAnalyzer = null; // Instance of the Analyzer class
 let isPipelineRunning = false;
 let isAppReady = false;
 let readyQueue = [];
+
+// --- DEFAULT GREMLIN PROMPT CONSTANTS for Writer & Auditor (managed within content.js) ---
+const DEFAULT_WRITER_INSTRUCTIONS_TEMPLATE = `[OOC: You are a master writer. Follow these instructions from your project lead precisely for your next response. Do not mention the blueprint or instructions in your reply. Your writing should be creative and engaging, bringing this plan to life. Do not write from the user's perspective. Write only the character's response.\n\n# INSTRUCTIONS\n{{BLUEPRINT}}]`;
+const DEFAULT_AUDITOR_INSTRUCTIONS_TEMPLATE = `[OOC: You are a master line editor. Your task is to revise and polish the following text. Correct any grammatical errors, awkward phrasing, or typos. Eliminate repetitive words and sentence structures. Enhance the prose to be more evocative and impactful, while respecting the established character voice and tone. If the text is fundamentally flawed or completely fails to follow the narrative, rewrite it from scratch to be high quality. **CRUCIAL:** Your output must ONLY be the final, edited text. Do NOT include any commentary, explanations, or introductory phrases like "Here is the revised version:".\n\n# TEXT TO EDIT\n{{WRITER_PROSE}}]`;
 
 
 // SUGGESTED_MODELS
@@ -82,28 +93,39 @@ const defaultSettings = {
     gremlinPapaEnabled: true,
     gremlinTwinsEnabled: true,
     gremlinMamaEnabled: true,
-    gremlinTwinsIterations: 3, // Default to 3 iterations (6 total calls for Vex/Vax)
+    gremlinTwinsIterations: 3,
     gremlinAuditorEnabled: false,
+
     gremlinPapaPreset: 'Default',
     gremlinPapaApi: 'claude',
     gremlinPapaModel: 'claude-4.0-opus-20240627',
     gremlinPapaSource: '',
+    gremlinPapaInstructions: '', // NEW: Empty means use default from projectgremlin.js
+
     gremlinTwinsPreset: 'Default',
     gremlinTwinsApi: 'google',
     gremlinTwinsModel: 'gemini-2.5-flash-lite-preview-06-17',
     gremlinTwinsSource: '',
+    gremlinTwinsVexInstructionsBase: '', // NEW
+    gremlinTwinsVaxInstructionsBase: '', // NEW
+
     gremlinMamaPreset: 'Default',
     gremlinMamaApi: 'claude',
     gremlinMamaModel: 'claude-3.7-sonnet',
     gremlinMamaSource: '',
+    gremlinMamaInstructions: '', // NEW
+
     gremlinWriterPreset: 'Default',
     gremlinWriterApi: 'openrouter',
     gremlinWriterModel: 'nousresearch/hermes-3-llama-3.1-405b',
     gremlinWriterSource: '',
+    gremlinWriterInstructionsTemplate: '', // NEW
+
     gremlinAuditorPreset: 'Default',
     gremlinAuditorApi: 'openai',
     gremlinAuditorModel: 'gpt-4o',
     gremlinAuditorSource: '',
+    gremlinAuditorInstructionsTemplate: '', // NEW
 };
 
 // 2. HELPER FUNCTIONS (Prose Polisher - UI & Rule Management)
@@ -277,6 +299,108 @@ function updateGremlinApiDisplay(role) {
     }
 }
 
+async function showInstructionsEditorPopup(gremlinRole) {
+    if (!isAppReady) { window.toastr.info("SillyTavern is still loading, please wait."); return; }
+    const settings = extension_settings[EXTENSION_NAME];
+    const roleUpper = gremlinRole.charAt(0).toUpperCase() + gremlinRole.slice(1);
+
+    let currentInstructions = '';
+    let defaultInstructions = ''; // For single textarea roles
+    let instructionSettingKey = `gremlin${roleUpper}Instructions`; // Default key
+    let title = `Edit Instructions for ${roleUpper} Gremlin`;
+    let placeholdersInfo = '';
+    const popupContent = document.createElement('div');
+    let textareasHtml = '';
+
+    // Use imported defaults from projectgremlin.js for Papa, Twins, Mama
+    // Use local defaults for Writer, Auditor
+    switch (gremlinRole) {
+        case 'papa':
+            currentInstructions = settings.gremlinPapaInstructions || PG_DEFAULT_PAPA_INSTRUCTIONS;
+            defaultInstructions = PG_DEFAULT_PAPA_INSTRUCTIONS;
+            instructionSettingKey = 'gremlinPapaInstructions';
+            placeholdersInfo = `<small style="display:block; margin-bottom:5px;">This prompt is given to Papa Gremlin to generate the initial blueprint. No dynamic pipeline placeholders are used within this prompt itself.</small>`;
+            textareasHtml = `<textarea id="pp_instructions_editor" class="text_pole" style="min-height: 300px; width: 100%; resize: vertical; box-sizing: border-box;">${currentInstructions}</textarea>`;
+            break;
+        case 'twins':
+            title = `Edit Base Instructions for Twin Gremlins (Vex & Vax)`;
+            const currentVexBase = settings.gremlinTwinsVexInstructionsBase || PG_DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE;
+            const defaultVexBase = PG_DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE;
+            const currentVaxBase = settings.gremlinTwinsVaxInstructionsBase || PG_DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE;
+            const defaultVaxBase = PG_DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE;
+
+            placeholdersInfo = `<small style="display:block; margin-bottom:5px;">These are the core persona instructions for Vex and Vax. They are dynamically inserted into a larger prompt structure that also includes Papa's blueprint and any previous twin ideas. The surrounding structure provides context like "Get inspired! Provide a concise note..."</small>`;
+            textareasHtml = `
+                <h4>Vex (Character Depth, Emotion)</h4>
+                <textarea id="pp_instructions_vex_editor" class="text_pole" style="min-height: 150px; width: 100%; resize: vertical; box-sizing: border-box;">${currentVexBase}</textarea>
+                <hr style="margin: 10px 0;">
+                <h4>Vax (Plot, Action, World)</h4>
+                <textarea id="pp_instructions_vax_editor" class="text_pole" style="min-height: 150px; width: 100%; resize: vertical; box-sizing: border-box;">${currentVaxBase}</textarea>
+            `;
+            break;
+        case 'mama':
+            currentInstructions = settings.gremlinMamaInstructions || PG_DEFAULT_MAMA_INSTRUCTIONS;
+            defaultInstructions = PG_DEFAULT_MAMA_INSTRUCTIONS;
+            instructionSettingKey = 'gremlinMamaInstructions';
+            placeholdersInfo = `<small style="display:block; margin-bottom:5px;">This prompt is given to Mama Gremlin. Ensure your custom prompt includes these placeholders if needed: <code>{{BLUEPRINT}}</code> (Papa's or initial blueprint), <code>{{TWIN_DELIBERATIONS}}</code> (collected ideas from Vex/Vax), <code>{{BLUEPRINT_SOURCE}}</code> (description of the blueprint's origin, e.g., "Papa's Blueprint").</small>`;
+            textareasHtml = `<textarea id="pp_instructions_editor" class="text_pole" style="min-height: 300px; width: 100%; resize: vertical; box-sizing: border-box;">${currentInstructions}</textarea>`;
+            break;
+        case 'writer':
+            currentInstructions = settings.gremlinWriterInstructionsTemplate || DEFAULT_WRITER_INSTRUCTIONS_TEMPLATE;
+            defaultInstructions = DEFAULT_WRITER_INSTRUCTIONS_TEMPLATE;
+            instructionSettingKey = 'gremlinWriterInstructionsTemplate';
+            placeholdersInfo = `<small style="display:block; margin-bottom:5px;">This is a template for the Writer Gremlin. Ensure your custom prompt includes the placeholder: <code>{{BLUEPRINT}}</code> (which will be Mama's final blueprint or the combined plan if Mama is disabled).</small>`;
+            textareasHtml = `<textarea id="pp_instructions_editor" class="text_pole" style="min-height: 300px; width: 100%; resize: vertical; box-sizing: border-box;">${currentInstructions}</textarea>`;
+            break;
+        case 'auditor':
+            currentInstructions = settings.gremlinAuditorInstructionsTemplate || DEFAULT_AUDITOR_INSTRUCTIONS_TEMPLATE;
+            defaultInstructions = DEFAULT_AUDITOR_INSTRUCTIONS_TEMPLATE;
+            instructionSettingKey = 'gremlinAuditorInstructionsTemplate';
+            placeholdersInfo = `<small style="display:block; margin-bottom:5px;">This is a template for the Auditor Gremlin. Ensure your custom prompt includes the placeholder: <code>{{WRITER_PROSE}}</code> (the text generated by the Writer Gremlin).</small>`;
+            textareasHtml = `<textarea id="pp_instructions_editor" class="text_pole" style="min-height: 300px; width: 100%; resize: vertical; box-sizing: border-box;">${currentInstructions}</textarea>`;
+            break;
+        default:
+            window.toastr.error(`Unknown Gremlin role for instruction editing: ${gremlinRole}`);
+            return;
+    }
+
+    popupContent.innerHTML = `
+        ${placeholdersInfo}
+        <div style="margin-top: 10px; margin-bottom: 10px;">
+            ${textareasHtml}
+        </div>
+        <button id="pp_reset_instructions_btn" class="menu_button">Reset to Default</button>
+    `;
+
+    const resetButton = popupContent.querySelector('#pp_reset_instructions_btn');
+    if (resetButton) {
+        resetButton.addEventListener('pointerup', () => {
+            if (gremlinRole === 'twins') {
+                popupContent.querySelector('#pp_instructions_vex_editor').value = PG_DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE;
+                popupContent.querySelector('#pp_instructions_vax_editor').value = PG_DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE;
+            } else {
+                popupContent.querySelector('#pp_instructions_editor').value = defaultInstructions;
+            }
+            window.toastr.info('Instructions reset to default. Click "OK" to save this reset, or "Cancel" to discard.');
+        });
+    }
+
+    if (await callGenericPopup(popupContent, POPUP_TYPE.CONFIRM, title, { wide: true, large: true, overflowY: 'auto' })) {
+        if (gremlinRole === 'twins') {
+            const vexInstructions = popupContent.querySelector('#pp_instructions_vex_editor').value;
+            const vaxInstructions = popupContent.querySelector('#pp_instructions_vax_editor').value;
+            // Store empty string if it's the same as default, otherwise store the custom one.
+            settings.gremlinTwinsVexInstructionsBase = (vexInstructions.trim() === PG_DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE.trim()) ? '' : vexInstructions;
+            settings.gremlinTwinsVaxInstructionsBase = (vaxInstructions.trim() === PG_DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE.trim()) ? '' : vaxInstructions;
+        } else {
+            const newInstructions = popupContent.querySelector('#pp_instructions_editor').value;
+            settings[instructionSettingKey] = (newInstructions.trim() === defaultInstructions.trim()) ? '' : newInstructions;
+        }
+        saveSettingsDebounced();
+        window.toastr.success(`Instructions for ${roleUpper} Gremlin saved.`);
+    }
+}
+
 function handleSentenceCapitalization(messageIdOrElement) {
     if (!isAppReady) { console.warn(`${LOG_PREFIX} handleSentenceCapitalization called before app ready.`); return; }
     let messageElement;
@@ -359,30 +483,43 @@ async function onUserMessageRenderedForGremlin(messageId) { // messageId from th
     isPipelineRunning = true;
 
     try {
-        const finalBlueprint = await runGremlinPlanningPipeline(); // Assumes user message is in chat for /gen
+        const finalBlueprint = await runGremlinPlanningPipeline(); // This now uses settings internally
         if (!finalBlueprint) {
             throw new Error('Project Gremlin planning failed to produce a blueprint.');
         }
 
         let finalInjectedInstruction;
+        // Resolve Writer and Auditor instruction templates
+        const writerInstructionTemplateSetting = settings.gremlinWriterInstructionsTemplate;
+        const writerTemplate = (writerInstructionTemplateSetting && writerInstructionTemplateSetting.trim() !== '')
+            ? writerInstructionTemplateSetting
+            : DEFAULT_WRITER_INSTRUCTIONS_TEMPLATE;
+
+        const auditorInstructionTemplateSetting = settings.gremlinAuditorInstructionsTemplate;
+        const auditorTemplate = (auditorInstructionTemplateSetting && auditorInstructionTemplateSetting.trim() !== '')
+            ? auditorInstructionTemplateSetting
+            : DEFAULT_AUDITOR_INSTRUCTIONS_TEMPLATE;
+
+
         if (settings.gremlinAuditorEnabled) {
             console.log('[ProjectGremlin] Auditor enabled. Running Writer step internally...');
             window.toastr.info("Gremlin Pipeline: Step 4 - Writer is crafting...", "Project Gremlin", { timeOut: 7000 });
             if (!await applyGremlinEnvironment('writer')) throw new Error("Failed to configure Writer environment for Auditor path.");
-            const writerSystemInstruction = `[OOC: You are a master writer. Follow these instructions from your project lead precisely for your next response. Do not mention the blueprint or instructions in your reply. Your writing should be creative and engaging, bringing this plan to life. Do not write from the user's perspective. Write only the character's response.\n\n# INSTRUCTIONS\n${finalBlueprint}]`;
-            const writerProse = await executeGen(writerSystemInstruction); 
+            
+            const writerSystemInstruction = writerTemplate.replace('{{BLUEPRINT}}', finalBlueprint);
+            const writerProse = await executeGen(writerSystemInstruction);
             if (!writerProse.trim()) throw new Error("Internal Writer Gremlin step failed to produce a response.");
             console.log('[ProjectGremlin] Writer Gremlin\'s Prose (for Auditor):', writerProse.substring(0,100) + "...");
 
             console.log('[ProjectGremlin] Preparing final injection for Auditor.');
             window.toastr.info("Gremlin Pipeline: Handing off to Auditor...", "Project Gremlin", { timeOut: 4000 });
             if (!await applyGremlinEnvironment('auditor')) throw new Error("Failed to configure Auditor environment.");
-            finalInjectedInstruction = `[OOC: You are a master line editor. Your task is to revise and polish the following text. Correct any grammatical errors, awkward phrasing, or typos. Eliminate repetitive words and sentence structures. Enhance the prose to be more evocative and impactful, while respecting the established character voice and tone. If the text is fundamentally flawed or completely fails to follow the narrative, rewrite it from scratch to be high quality. **CRUCIAL:** Your output must ONLY be the final, edited text. Do NOT include any commentary, explanations, or introductory phrases like "Here is the revised version:".\n\n# TEXT TO EDIT\n${writerProse}]`;
+            finalInjectedInstruction = auditorTemplate.replace('{{WRITER_PROSE}}', writerProse);
         } else {
             console.log('[ProjectGremlin] Auditor disabled. Preparing final instruction for Writer.');
             window.toastr.info("Gremlin Pipeline: Handing off to Writer...", "Project Gremlin", { timeOut: 4000 });
             if (!await applyGremlinEnvironment('writer')) throw new Error("Failed to configure Writer environment.");
-            finalInjectedInstruction = `[OOC: You are a master writer. Follow these instructions from your project lead precisely for your next response. Do not mention the blueprint or instructions in your reply. Your writing should be creative and engaging, bringing this plan to life. Do not write from the user's perspective. Write only the character's response.\n\n# INSTRUCTIONS\n${finalBlueprint}]`;
+            finalInjectedInstruction = writerTemplate.replace('{{BLUEPRINT}}', finalBlueprint);
         }
 
         window.toastr.success("Gremlin Pipeline: Blueprint complete! Prompt instruction prepared.", "Project Gremlin");
@@ -413,7 +550,7 @@ function onAiCharacterMessageRendered(messageElement) {
     }
     const messageId = messageElement.getAttribute('mesid');
     const context = getContext();
-    const message = context.chat.find(msg => msg.id === messageId);
+    const message = context.chat.find(msg => String(msg.id) === String(messageId)); // Ensure messageId is treated as string for comparison if needed
     if (!message || message.is_user) return;
 
     let messageToAnalyze = message.mes;
@@ -423,7 +560,8 @@ function onAiCharacterMessageRendered(messageElement) {
         if (replacedMessage !== originalMessageForRegex) {
             console.log(`${LOG_PREFIX} Applying internal Prose Polisher regex replacements.`);
             message.mes = replacedMessage;
-            messageElement.querySelector('.mes_text').innerHTML = replacedMessage; 
+            const mesTextElement = messageElement.querySelector('.mes_text');
+            if (mesTextElement) mesTextElement.innerHTML = replacedMessage; 
             messageToAnalyze = replacedMessage;
         }
     }
@@ -738,10 +876,16 @@ async function initializeExtensionCore() {
                     if (browseBtn) browseBtn.addEventListener('pointerup', () => gremlinPresetNavigator.open(presetSelectId));
                     if (apiBtn) apiBtn.addEventListener('pointerup', () => showApiEditorPopup(role));
                     updateGremlinApiDisplay(role);
+
+                    // NEW: Add event listener for "Edit Instructions" button
+                    const editInstructionsBtn = document.querySelector(`.pp-edit-instructions-btn[data-gremlin-role="${role}"]`);
+                    if (editInstructionsBtn) {
+                        editInstructionsBtn.addEventListener('pointerup', () => showInstructionsEditorPopup(role));
+                    }
                 });
                 updateGremlinToggleState();
-                console.log(`${LOG_PREFIX} Gremlin preset dropdowns populated.`);
-            } catch (err) { console.error(`${LOG_PREFIX} Error populating Gremlin preset dropdowns:`, err); }
+                console.log(`${LOG_PREFIX} Gremlin preset dropdowns populated and instruction editors bound.`);
+            } catch (err) { console.error(`${LOG_PREFIX} Error populating Gremlin preset dropdowns or binding instruction editors:`, err); }
 
             eventSource.on(event_types.GENERATION_AFTER_COMMANDS, onBeforeGremlinGeneration);
             eventSource.makeLast(event_types.USER_MESSAGE_RENDERED, (messageId) => onUserMessageRenderedForGremlin(messageId)); 
