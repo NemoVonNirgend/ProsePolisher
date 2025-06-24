@@ -16,6 +16,82 @@
 .prose-polisher-blacklist-manager .add-controls .text_pole {
     flex-grow: 1;
 }
+/* Style for list items in managers */
+.prose-polisher-whitelist-manager .list-container,
+.prose-polisher-blacklist-manager .list-container {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--nemo-border-color, #444);
+    border-radius: 5px;
+    margin-bottom: 10px;
+    background-color: var(--nemo-tertiary-bg, #1e1e1e);
+}
+.prose-polisher-whitelist-manager .list-container ul,
+.prose-polisher-blacklist-manager .list-container ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.prose-polisher-whitelist-manager .list-container li,
+.prose-polisher-blacklist-manager .list-container li {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--nemo-border-color, #444);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.prose-polisher-whitelist-manager .list-container li:last-child,
+.prose-polisher-blacklist-manager .list-container li:last-child {
+    border-bottom: none;
+}
+.prose-polisher-whitelist-manager .list-container li span,
+.prose-polisher-blacklist-manager .list-container li span {
+    flex-grow: 1;
+    word-break: break-word;
+}
+.prose-polisher-whitelist-manager .list-container li .delete-btn,
+.prose-polisher-blacklist-manager .list-container li .delete-btn {
+    margin-left: 10px;
+    color: var(--nemo-dangerous-color, #e74c3c);
+    cursor: pointer;
+}
+.prose-polisher-whitelist-manager .add-controls,
+.prose-polisher-blacklist-manager .add-controls {
+    display: flex;
+    gap: 10px;
+}
+
+/* Style for frequency leaderboard table */
+.prose-polisher-frequency-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+    font-size: 0.9em;
+}
+.prose-polisher-frequency-table th,
+.prose-polisher-frequency-table td {
+    border: 1px solid var(--nemo-border-color, #444);
+    padding: 8px;
+    text-align: left;
+}
+.prose-polisher-frequency-table th {
+    background-color: var(--nemo-secondary-bg, #2a2a2a);
+    font-weight: bold;
+    color: var(--nemo-primary-accent, #6a3d9a);
+}
+.prose-polisher-frequency-table tr:nth-child(even) {
+    background-color: var(--nemo-tertiary-bg, #1e1e1e);
+}
+.prose-polisher-frequency-table tr:hover {
+    background-color: var(--nemo-item-hover-bg, #333);
+}
+.prose-polisher-frequency-table td:first-child {
+    word-break: break-word;
+}
+.prose-polisher-frequency-table .is-pattern td:first-child {
+    font-weight: bold;
+    color: var(--nemo-secondary-accent, #b592e0); /* Or an orange/gold color */
+}
 
 
 /* --- NEWLY ADDED & REFACTORED STYLES FOR PROJECT GREMLIN --- */
@@ -29,12 +105,13 @@
     border: 1px solid var(--nemo-border-color, #444);
     color: var(--nemo-text-muted, #999);
     transition: all 0.2s ease-in-out;
+    border-radius: 6px;
 }
 #pp_gremlin_toggle.active {
     color: white;
     background-color: var(--nemo-primary-accent, #6a3d9a);
     border-color: var(--nemo-primary-accent, #6a3d9a);
-    box-shadow: 0 0 10px var(--nemo-primary-accent, #6a3d9a);
+    box-shadow: 0 0 8px var(--nemo-primary-accent, #6a3d9a);
 }
 
 /* Gremlin Role Configuration Block */
@@ -75,11 +152,11 @@
 }
 .pp-controls-wrapper > .text_pole, .pp-controls-wrapper > select {
     flex-grow: 1;
+    min-width: 0; /* Allow flex item to shrink */
 }
 .pp-controls-wrapper > .menu_button {
     flex-shrink: 0;
 }
-
 
 /* Gremlin PRESET NAVIGATOR MODAL (Simplified) */
 #pp-preset-navigator-modal {
@@ -98,10 +175,10 @@
 #pp-preset-navigator-modal .close-button:hover { color: #fff; transform: scale(1.1); }
 #pp-preset-navigator-modal .navigator-body { display: flex; flex-grow: 1; overflow: hidden; }
 #pp-preset-navigator-modal .navigator-main-panel { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--nemo-secondary-bg, #2a2a2a); padding: 15px; border-radius: 8px; }
-#navigator-grid-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--nemo-border-color, #444); flex-shrink: 0; gap: 20px; }
-#navigator-breadcrumbs { font-size: 1.1em; color: var(--nemo-text-color, #fff); }
+#navigator-grid-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--nemo-border-color, #444); flex-shrink: 0; gap: 20px; flex-wrap: wrap; }
+#navigator-breadcrumbs { font-size: 1.1em; color: var(--nemo-text-color, #fff); flex-grow: 1; min-width: 0; }
 #navigator-breadcrumbs .link { color: var(--nemo-secondary-accent, #b592e0); cursor: pointer; }
-#navigator-header-controls { display: flex; align-items: center; gap: 15px; }
+#navigator-header-controls { display: flex; align-items: center; gap: 15px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end;}
 #navigator-search-controls { display: flex; align-items: center; position: relative; }
 #navigator-search-input { width: 220px; padding-right: 30px; }
 #navigator-search-clear { position: absolute; right: 0; top: 0; bottom: 0; background: transparent; border: none; cursor: pointer; color: var(--nemo-text-muted, #999); padding: 0 10px; }
@@ -123,6 +200,120 @@
 .pp-suggestion-item:last-child { border-bottom: none; }
 .pp-suggestion-item:hover { background-color: var(--nemo-item-hover-bg, #333); }
 .pp-custom-binding-inputs { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+
+/* Regex Navigator List View */
+#regex-navigator-list-view {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    padding-right: 5px; /* Space for scrollbar */
+}
+.regex-navigator-item {
+    display: flex;
+    align-items: center;
+    background-color: var(--nemo-tertiary-bg, #1e1e1e);
+    border: 1px solid var(--nemo-border-color, #444);
+    border-radius: 6px;
+    padding: 10px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+.regex-navigator-item:hover {
+    background-color: var(--nemo-item-hover-bg, #333);
+}
+.regex-navigator-item.is-disabled {
+    opacity: 0.6;
+    font-style: italic;
+}
+.regex-navigator-item.is-newly-added {
+     border-color: var(--nemo-primary-accent, #6a3d9a); /* Highlight new rules */
+}
+.regex-navigator-item .item-icon {
+    font-size: 1.5em;
+    margin-right: 15px;
+    color: var(--nemo-secondary-accent, #b592e0);
+    flex-shrink: 0;
+}
+.regex-navigator-item.is-dynamic .item-icon {
+     color: #8ea9e8; /* Different color for dynamic */
+}
+.regex-navigator-item .item-details {
+    flex-grow: 1;
+    min-width: 0; /* Allow text to wrap */
+}
+.regex-navigator-item .script-name {
+    font-weight: bold;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.regex-navigator-item .find-regex {
+    font-family: monospace;
+    font-size: 0.8em;
+    color: var(--nemo-text-muted, #999);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.regex-navigator-item .item-status {
+    display: flex;
+    align-items: center;
+    font-size: 0.9em;
+    color: var(--nemo-text-muted, #999);
+    flex-shrink: 0;
+    margin-left: 15px;
+}
+.regex-navigator-item .item-status span {
+    margin-right: 5px;
+}
+.regex-navigator-item .status-toggle-icon {
+    font-size: 1.2em;
+    color: var(--nemo-primary-accent, #6a3d9a);
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+.regex-navigator-item.is-disabled .status-toggle-icon {
+    color: var(--nemo-dangerous-color, #e74c3c);
+}
+.regex-navigator-item .status-toggle-icon:hover {
+    color: #fff;
+}
+
+/* Rule Editor Popup */
+.prose-polisher-rule-editor-popup label {
+    display: block;
+    margin-top: 10px;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+.prose-polisher-rule-editor-popup input[type="text"],
+.prose-polisher-rule-editor-popup textarea {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+}
+.prose-polisher-rule-editor-popup textarea {
+    min-height: 80px;
+    resize: vertical;
+    font-family: monospace;
+}
+.prose-polisher-rule-editor-popup .editor-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 15px;
+}
+.prose-polisher-rule-editor-popup .actions-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+.prose-polisher-rule-editor-popup .actions-left .checkbox_label {
+    margin: 0;
+    font-weight: normal;
+}
+
 
 @keyframes pulse-glow {
     0% { box-shadow: 0 0 5px rgba(106, 61, 154, 0.2); }

@@ -78,6 +78,9 @@ export class PresetNavigator {
     }
 
     async open(targetSelectId) {
+        // Check window.isAppReady here as this function is called from a button handler
+        if (!window.isAppReady) { window.toastr.info("SillyTavern is still loading, please wait."); return; }
+
         this.targetSelectId = targetSelectId;
         this.loadMetadata();
         this.allPresets = this.fetchPresetList();
@@ -162,7 +165,7 @@ export class PresetNavigator {
         const icon = document.createElement('div');
         icon.className = 'item-icon';
         icon.innerHTML = `<i class="fa-solid ${type === 'folder' ? 'fa-folder' : 'fa-file-lines'}"></i>`;
-        
+
         const nameEl = document.createElement('div');
         nameEl.className = 'item-name';
         nameEl.textContent = data.name.split('/').pop();
@@ -172,7 +175,7 @@ export class PresetNavigator {
         return itemEl;
     }
 
-    createListItem(item) { return this.createGridItem(item); }
+    createListItem(item) { return this.createGridItem(item); } // Currently same style
 
     handleGridClick(e) {
         const item = e.target.closest('.grid-item');
@@ -211,7 +214,8 @@ export class PresetNavigator {
     }
 
     fetchPresetList() {
-        return openai_setting_names ? Object.keys(openai_setting_names).map(name => ({ name })) : [];
+        // openai_setting_names should be available after APP_READY, but check anyway
+        return window.isAppReady && openai_setting_names ? Object.keys(openai_setting_names).map(name => ({ name })) : [];
     }
 
     loadMetadata() {
@@ -226,6 +230,9 @@ export class PresetNavigator {
     }
 
     async createNewFolder() {
+        // Check window.isAppReady here as this function is called from a button handler
+        if (!window.isAppReady) { window.toastr.info("SillyTavern is still loading, please wait."); return; }
+
         const name = await callGenericPopup('New Folder Name:', POPUP_TYPE.INPUT, 'New Folder');
         if (!name) return;
         const newId = generateUUID();

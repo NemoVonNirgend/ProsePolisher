@@ -86,7 +86,16 @@
                     <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinTwinsPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
                     <button class="menu_button pp-select-api-btn" data-gremlin-role="twins" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
                 </div>
-                <small>Fast model for the 6-step Vex/Vax refinement.</small>
+                <div style="margin-top: 8px;">
+                    <label for="pp_gremlinTwinsIterations" style="margin-right: 5px; font-weight:normal; font-size: 0.9em;">Refinement Iterations (per Twin):</label>
+                    <select id="pp_gremlinTwinsIterations" class="text_pole" style="width: auto; font-size: 0.9em; padding: 4px;" title="Number of messages each Twin (Vex/Vax) will generate.">
+                        <option value="1">1 Iteration (2 total calls)</option>
+                        <option value="2">2 Iterations (4 total calls)</option>
+                        <option value="3" selected>3 Iterations (6 total calls)</option>
+                    </select>
+                    <small style="display: block; margin-top: 2px;">Controls how many refinement suggestions each Twin provides. More iterations mean more detailed (and slower) planning.</small>
+                </div>
+                <small>Fast model for the Vex/Vax refinement (e.g., character depth, plot progression).</small>
             </div>
 
             <!-- Mama Gremlin -->
