@@ -1,138 +1,168 @@
-## Table of Contents
-- [Key Features](#key-features)
-- [How It Works: The Three Pillars](#how-it-works-the-three-pillars)
-- [Usage Guide](#usage-guide)
-  - [Initial Setup](#initial-setup)
-  - [The Settings Panel](#the-settings-panel)
-  - [The Regex Navigator](#the-regex-navigator)
-  - [AI Rule Generation in Action](#ai-rule-generation-in-action)
-- [For Power Users](#for-power-users)
-  - [Manually Adding Static Rules](#manually-adding-static-rules)
-  - [Understanding the AI Prompt](#understanding-the-ai-prompt)
-- [Troubleshooting & FAQ](#troubleshooting--faq)
-- [Contributing](#contributing)
-- [License](#license)
+***
+
+## Prose Polisher: A Complete User Guide
+
+Welcome to Prose Polisher! This guide will walk you through every feature, helping you transform your AI's writing from repetitive to remarkable.
+
+### Table of Contents
+1.  **[Introduction: What Does This Do?](#1-introduction-what-does-this-do)**
+2.  **[Part 1: The Basics - First-Time Setup](#2-part-1-the-basics---first-time-setup)**
+3.  **[Part 2: The Analyzer - Your Slop-Fighting Toolkit](#3-part-2-the-analyzer---your-slop-fighting-toolkit)**
+4.  **[Part 3: The Regex Navigator - Your Command Center](#4-part-3-the-regex-navigator---your-command-center)**
+5.  **[Part 4: Project Gremlin - The Ultimate AI Writing Pipeline](#5-part-4-project-gremlin---the-ultimate-ai-writing-pipeline)**
+6.  **[Part 5: Common Workflows](#6-part-5-common-workflows)**
 
 ---
 
-## Key Features
+### 1. Introduction: What Does This Do?
 
-*   **✒️ Curated Static Rules:** Comes pre-loaded with over 30 high-quality rules to fix the most common writing clichés, such as repetitive blushing, hitched breaths, pounding hearts, and more.
-*   **🧠 Dynamic AI Learning:** When enabled, the extension actively listens to AI messages, identifies *new* repetitive phrases unique to your current model or character, and uses an LLM to automatically generate new, creative regex rules to fix them.
-*   **🎛️ Full Regex Navigator:** A dedicated UI to view, enable/disable, edit, and create your own static or dynamic rules without ever touching a JSON file.
-*   **📊 On-Demand Chat Analysis:** Analyze your entire chat history with a single click to instantly populate frequency data and identify potential slop candidates for AI rule generation.
-*   **Capitalization Correction:** Automatically capitalizes the beginning of sentences in AI responses, ensuring that replacements fit seamlessly and grammatically.
-*   **💡 Intelligent Pattern Detection:** The frequency analysis is smart. It groups similar phrases (e.g., "a flicker of doubt crossed his eyes" and "a flicker of anger crossed his face") into a single, more powerful pattern.
-*   **✅ Seamless Integration:** Rules are applied globally and instantly, altering both the displayed chat and the context sent in the next prompt, preventing the AI from repeating its own slop.
+Prose Polisher is a two-pronged tool designed to dramatically improve AI writing quality:
 
----
+*   **The Regex Polisher:** It finds and replaces common, repetitive, or clichéd phrases (which we call "slop") with more creative and varied alternatives. It does this through a combination of a pre-made list of fixes and an AI that learns the *specific* bad habits of your model and creates new fixes on the fly.
+*   **Project Gremlin:** An advanced, experimental, multi-AI pipeline that acts like a team of writers and editors. It meticulously plans, refines, and audits the AI's response *before* it's written, resulting in unparalleled quality, coherence, and creativity.
 
-## How It Works: The Three Pillars
+Let's dive into how to use it.
 
-Prose Polisher operates on three core principles to provide a comprehensive solution.
+### 2. Part 1: The Basics - First-Time Setup
 
-1.  **Static Correction (The Foundation):**
-    The `regex_rules.json` file contains a list of hand-crafted rules that target common, universally acknowledged writing crutches. When "Enable Static Regex Fixes" is on, these rules are always active, instantly replacing phrases like *"His cheeks flushed red"* with more engaging alternatives like *"as warmth spread across his cheeks"*.
+Find the **Prose Polisher (Regex + AI)** dropdown in your Extensions settings panel.
 
-2.  **Dynamic Learning (The Smart Assistant):**
-    This is the AI-powered core. When "Enable Dynamic AI Learning" is active:
-    *   The extension analyzes every incoming AI message for repetitive phrases (n-grams).
-    *   When a phrase is repeated more than a set number of times (`SLOP_THRESHOLD`, default 3), it's flagged as a "slop candidate".
-    *   After a certain number of further messages (`dynamicTriggerCount`), the extension sends these candidates to an LLM.
-    *   The AI is prompted to act as a regex expert, creating new `findRegex` and `replaceString` rules for the provided slop.
-    *   These new rules are automatically saved and activated, teaching Prose Polisher how to fix the specific bad habits of your current AI model.
+1.  **Enable Static Regex Fixes:**
+    *   **What it is:** This switch activates over 50 hand-crafted rules that fix the most common writing clichés (e.g., "his heart hammered," "she bit her lip," "a smirk tugged at his lips").
+    *   **How to use it:** **Check this box.** This is the foundational layer of the extension and provides immediate quality improvements.
 
-3.  **User Control (The Cockpit):**
-    You are the final arbiter of style. The **Regex Navigator** and settings panel give you total control. You can disable rules you don't like, edit AI-generated rules to better suit your taste, or create entirely new ones from scratch. You can also manually trigger the analysis and rule generation process at any time.
+2.  **Enable Dynamic AI Learning:**
+    *   **What it is:** This is the "smart" part of the extension. When active, it reads the AI's messages, identifies new, unique repetitive phrases, and uses an AI to automatically generate new rules to fix them.
+    *   **How to use it:** **Check this box.** This allows the extension to adapt and learn the specific bad habits of your current AI model.
 
----
+3.  **Integrate with Global Regex:**
+    *   **What it is:** This setting pushes all active Prose Polisher rules into SillyTavern's main regex engine. This is how the fixes are applied to the chat and context.
+    *   **How to use it:** **Keep this box checked (Recommended).** If you turn this off, none of the fixes will be applied. After changing this setting, a "Reload to apply?" prompt will appear; click "Reload Now".
 
-## Usage Guide
+4.  **Auto-Rule Gen Trigger:**
+    *   **What it is:** After the analyzer identifies a new repetitive phrase, this number determines how many *more* AI messages to wait before it automatically tries to generate a fix.
+    *   **How to use it:** The default (e.g., 30) is fine for most users. A lower number means faster (but more frequent) AI rule generation. A higher number will batch more candidates together for a single, larger generation task.
 
-### Initial Setup
+### 3. Part 2: The Analyzer - Your Slop-Fighting Toolkit
 
-After installation, navigate to the Extensions settings panel. You will find the "Prose Polisher (Regex + AI)" section.
+This set of buttons gives you manual control over the AI learning process.
 
-*   **Enable Static Regex Fixes:** It's highly recommended to keep this checked. This activates the foundational set of rules.
-*   **Enable Dynamic AI Learning:** Check this if you want the extension to learn and adapt to your AI's writing style. This is the most powerful feature of the extension.
+*   **Analyze Chat History**
+    *   **What it is:** Reads your *entire* current chat history in one go to find all repetitive phrases. This is the fastest way to identify slop.
+    *   **How to use it:**
+        1.  Click the button. A toast notification will say the analysis has started.
+        2.  Wait for the "Analysis complete" notification.
+        3.  The system now knows about all the repeated phrases. You can now use "Generate AI Rules" (see below) to fix them.
 
-### The Settings Panel
+*   **View Frequency Data**
+    *   **What it is:** Opens a popup showing a live leaderboard of the most-repeated phrases and patterns the analyzer has found, ranked by a "Slop Score."
+    *   **How to use it:** Click this at any time to see what phrases the AI is overusing. Phrases in **bold orange** are smart patterns the analyzer has detected (e.g., it grouped "his face paled" and "his knuckles whitened" into a pattern).
 
-*   **Auto-Rule Gen Trigger:** This number determines how many AI messages to wait *after* a slop candidate has been identified before sending it to the AI for rule generation. A lower number means faster rule creation; a higher number means it will batch more candidates together.
-*   **Open Regex Navigator:** Opens the main UI for managing all your rules.
-*   **Clear Frequency Data:** Resets all tracked phrase counts. Use this if you switch models or characters and want to start fresh.
-*   **Analyze Chat History:** A powerful tool. Click this to have Prose Polisher read your *entire* current chat history and build a list of all repetitive phrases. This is the fastest way to find slop.
-*   **View Frequency Data:** Opens a popup showing a live leaderboard of the most-repeated phrases and detected patterns in your chat.
-*   **Generate AI Rules from Analysis:** After running an analysis or letting the extension run for a while, click this to *manually* trigger the AI rule generation process for all currently identified slop candidates.
+*   **Generate AI Rules from Analysis**
+    *   **What it is:** This is the manual trigger for the AI rule-generation process. It takes all the slop candidates found so far and sends them to an LLM to create regex fixes.
+    *   **How to use it:**
+        1.  After a chat session or after using "Analyze Chat History," click this button.
+        2.  A series of toast notifications will appear, informing you that the "Twins" are pre-screening candidates and the "Writer/Mama/etc." is generating rules.
+        3.  When it's done, you'll get a success message. Any newly created rules are now active and can be seen in the Regex Navigator.
 
-### The Regex Navigator
+*   **Manage Whitelist**
+    *   **What it is:** A list of words the analyzer should **ignore**. This is perfect for character names, place names, or common words you don't want to be flagged as repetitive.
+    *   **How to use it:**
+        1.  Click the button to open the manager.
+        2.  Type a word (e.g., "Kael", "Eldoria") into the input box and click "Add".
+        3.  The word is now ignored by the frequency analysis.
 
-This is your command center for all rules.
+*   **Manage Blacklist**
+    *   **What it is:** A list of "banned" words and a corresponding weight (1-10). Any phrase containing a blacklisted word gets a huge penalty, making it much more likely to be flagged as slop. This is great for words you truly despise (e.g., "suddenly," "began to").
+    *   **How to use it:**
+        1.  Click the button.
+        2.  Type a word or phrase (e.g., "suddenly") into the input box.
+        3.  Set a weight (a higher weight means a bigger penalty).
+        4.  Click "Add".
 
-*   **Static vs. Dynamic:** Rules are clearly marked. Static rules (from the base file) cannot be deleted or have their content edited, but they can be disabled. Dynamic rules (created by you or the AI) are fully editable.
-*   **Enable/Disable:** Click the toggle icon on the right to quickly turn any rule on or off.
-*   **Edit/View:** Click anywhere else on a rule to open the editor.
-*   **Create:** Click the "New Dynamic Rule" button to create a custom rule from scratch.
-*   **New Rule Highlighting:** Newly AI-generated rules will have a pulsing glow, making them easy to spot.
+*   **Clear Frequency Data**
+    *   **What it is:** Resets the analyzer's memory.
+    *   **How to use it:** Click this when you start a new chat, switch characters, or change AI models to ensure the analysis starts fresh.
 
-### AI Rule Generation in Action
+*   **Regex Generation Controls**
+    *   **Regex Generation Method:** Choose between "Single Gremlin" (one AI call for a batch of rules) or "Iterative Twins" (a more complex, back-and-forth process for potentially higher quality but slower generation). "Single Gremlin" is a great starting point.
+    *   **Using Gremlin / Twin Refinement Cycles:** These dropdowns let you choose which Gremlin's API settings to use for rule generation or how many cycles the Twins should perform. You can generally leave these on their defaults unless you become a power user.
+    *   **Edit Regex Gen Prompt:** This opens an editor for the master prompt used to generate regex. **For advanced users only.**
+    *   **Skip Triage/Twin Check:** Bypasses the AI's pre-screening step. This is faster but may result in the AI trying to generate rules for nonsensical phrases.
 
-1.  Enable both Static and Dynamic modes.
-2.  Chat with your character as you normally would.
-3.  As the AI repeats itself, Prose Polisher silently counts the phrases in the background.
-4.  Once a phrase is identified as slop, you can either:
-    *   Wait for the trigger count to be met, and let the AI generate a rule automatically.
-    *   Click "Generate AI Rules from Analysis" to force the process immediately.
-5.  A toast notification will inform you that the AI is working.
-6.  Once complete, a success message will appear, and the new rules will be visible (and active!) in the Regex Navigator.
+### 4. Part 3: The Regex Navigator - Your Command Center
 
----
+Click the **"Open Regex Navigator"** button to access the heart of the extension. This is where you manage all rules.
 
-## For Power Users
+*   **The Rule List:**
+    *   The main view shows all static and dynamic rules.
+    *   <i class="fa-solid fa-database"></i> **Static Rules:** These are built-in. You cannot edit their content, but you can disable them.
+    *   <i class="fa-solid fa-wand-magic-sparkles"></i> **Dynamic Rules:** These are created by the AI or you. They are fully editable.
+    *   **Disabled rules** will be greyed out. **Newly added AI rules** will have a colored border so you can easily review them.
 
-### Manually Adding Static Rules
+*   **Managing a Rule:**
+    *   **Toggle On/Off:** Click the toggle icon (<i class="fa-solid fa-toggle-on"></i> / <i class="fa-solid fa-toggle-off"></i>) on the right of any rule to enable or disable it instantly.
+    *   **Edit a Rule:** Click anywhere on a dynamic rule's entry to open the editor. Here you can change its name, the "find" regex, and the "replace" string.
+    *   **Delete a Rule:** In the editor for a dynamic rule, click the "Delete Rule" button.
+    *   **Create a New Rule:** Click the `+ New Dynamic Rule` button at the bottom of the navigator. This opens a blank editor for you to create your own custom fix.
 
-If you have a set of regex fixes you always want to use, you can add them to the core ruleset.
+### 5. Part 4: Project Gremlin - The Ultimate AI Writing Pipeline
 
-1.  Navigate to `/public/scripts/extensions/third-party/ProsePolisher/`.
-2.  Open `regex_rules.json` in a text editor.
-3.  Add your new rule object to the JSON array, following the existing format. A valid rule requires an `id`, `scriptName`, `findRegex`, and `replaceString`.
-    ```json
-    {
-        "id": "STATIC_999",
-        "scriptName": "Slopfix - My Custom Fix",
-        "findRegex": "\\b([Hh]e|[Ss]he) let out a breath (?:[Hh]e|[Ss]he) didn't know (?:[Hh]e|[Ss]he) was holding\\b",
-        "replaceString": "{{random:$1 exhaled sharply,A sigh escaped $1 lips,with a sudden release of breath}}",
-        "disabled": false,
-        "isStatic": true
-    }
-    ```
-4.  Restart SillyTavern for the new static rules to be loaded.
+Project Gremlin is for when you want the absolute highest quality response and don't mind the extra time and API cost. It's a team of specialized AIs that plan the next response.
 
-### Understanding the AI Prompt
+*   **Enabling Project Gremlin:**
+    *   In the chat input bar, you will see a new **Wizard Hat icon** (<i class="fa-solid fa-hat-wizard"></i>).
+    *   **Click this button to toggle the pipeline.** When it's active (glowing), it will run automatically on your *next* message send. The toggle in the settings panel will reflect this state.
 
-Curious how the dynamic rules are made? The extension uses a detailed system prompt to instruct the LLM. You can find the full prompt in `content.js` inside the `generateAndSaveDynamicRules` function. This allows you to see the exact instructions the AI follows and even modify them if you wish to experiment.
+*   **The Gremlin Roles & Their Configuration:**
+    Each Gremlin has its own configuration block. They all follow the same pattern:
 
----
+    1.  **Enable/Disable Checkbox:** Turn this role on or off within the pipeline.
+    2.  **Preset Dropdown:** Select a SillyTavern parameter preset (for temperature, top_p, etc.) for this Gremlin.
+    3.  **Browse Button (<i class="fa-solid fa-folder-open"></i>):** Opens a file-browser style popup (**Preset Navigator**) to visually select a preset.
+    4.  **API Button (<i class="fa-solid fa-satellite-dish"></i>):** This is the most important button. It opens a popup where you can assign a specific API (OpenAI, Claude, OpenRouter, etc.) and Model for that Gremlin.
+    5.  **Instructions Button (<i class="fa-solid fa-file-pen"></i>):** Opens a large text editor where you can view and edit the master prompt for that Gremlin.
 
-## Troubleshooting & FAQ
+Here's what each Gremlin does:
 
-*   **Q: The AI-generated rules aren't very good!**
-    *   **A:** The quality of the generated rules depends heavily on the LLM used for generation (`deepseek-reasoning` by default). You can edit or delete any bad rule via the Regex Navigator. You can also try editing the system prompt in `content.js` to give the AI better instructions.
+*   **<i class="fa-solid fa-chess-king"></i> Papa Gremlin (The Architect):**
+    *   **Role:** Reads the entire chat history and creates a high-level "blueprint" for the next response. It focuses on plot progression, character consistency, and emotional beats.
+    *   **Recommended Model:** A high-intelligence model (e.g., GPT-4, Claude Opus).
 
-*   **Q: The extension isn't doing anything.**
-    *   **A:** Make sure you have enabled the toggles in the settings panel. If using dynamic mode, remember that it takes several repetitions of a phrase before a rule is even considered for creation. Try using the "Analyze Chat History" button to kickstart the process.
+*   **<i class="fa-solid fa-users"></i> Twin Gremlins (The Refiners):**
+    *   **Role:** A duo (Vex & Vax) that brainstorms creative ideas based on Papa's blueprint. Vex focuses on character emotion and depth, while Vax focuses on plot, action, and world-building.
+    *   **Recommended Model:** A fast, creative model (e.g., Gemini Flash, Hermes).
+    *   **Refinement Iterations:** Controls how many ideas each Twin generates. The default of 3 (6 total calls) is a good balance.
 
-*   **Q: I see `(PP)` rules in the main Regex settings, but I can't edit them there.**
-    *   **A:** This is intentional. Prose Polisher's rules are hidden from the standard Regex Processor UI to avoid clutter and confusion. **Always** use the **Prose Polisher Regex Navigator** to manage its rules.
+*   **<i class="fa-solid fa-crown"></i> Mama Gremlin (The Supervisor):**
+    *   **Role:** Takes Papa's blueprint and the Twins' chaotic ideas, then synthesizes them into a single, polished, and rule-compliant final blueprint. She is the quality control manager.
+    *   **Recommended Model:** A balanced model that's good at following complex instructions (e.g., GPT-4-Turbo, Claude Sonnet).
 
----
+*   **<i class="fa-solid fa-pen-fancy"></i> Writer Gremlin (The Author):**
+    *   **Role:** This Gremlin is **always active** when the pipeline runs. It takes the final blueprint from Mama and writes the actual character response.
+    *   **Recommended Model:** Your favorite creative roleplaying model.
 
-## Contributing
+*   **<i class="fa-solid fa-user-shield"></i> Auditor Gremlin (The Editor):**
+    *   **Role:** An optional final step. If enabled, the Auditor receives the Writer's complete response and does a final line-edit to polish the prose, fix grammar, and enhance impact.
+    *   **Recommended Model:** A high-quality model with strong editing skills (e.g., GPT-4, Claude Opus).
 
-Feedback, bug reports, and pull requests are welcome!
+### 6. Part 5: Common Workflows
 
-1.  **Suggestions & Bug Reports:** Please open an issue on the GitHub repository, providing as much detail as possible.
-2.  **New Static Rules:** If you have a high-quality regex for a common cliché, feel free to open a pull request to add it to the `regex_rules.json` file for everyone to use.
+#### Workflow 1: Fixing a New, Annoying Phrase
 
----
+1.  You notice your AI keeps saying "a cold shiver ran down her spine."
+2.  Go to the Prose Polisher settings and click **"Analyze Chat History."**
+3.  Wait for the analysis to complete.
+4.  Click **"Generate AI Rules from Analysis."**
+5.  Wait for the AI to work. You'll get a toast saying new rules have been created.
+6.  Click **"Open Regex Navigator."** You will see a new, highlighted rule named something like "Slopfix - Shivering Spine." You can click to view or edit its replacement options.
+7.  The next time the AI tries to write that phrase, it will be automatically replaced with a more creative alternative.
+
+#### Workflow 2: Getting a "Perfect" Response
+
+1.  You're at a critical point in the story and want a high-quality, long, and creative response from the AI.
+2.  In the Prose Polisher settings, configure your Gremlins. For example, assign Claude Opus to Papa, Gemini Flash to the Twins, and your best RP model to the Writer.
+3.  In the chat box, click the **Wizard Hat icon** (<i class="fa-solid fa-hat-wizard"></i>) to activate the pipeline for the next message. The icon will glow.
+4.  Type your message and hit send.
+5.  Watch the toast notifications as Papa, the Twins, and Mama do their work. This will take longer than a normal generation.
+6.  The final, high-quality response appears in the chat, crafted by the entire Gremlin team. The wizard hat will deactivate, ready for the next time you need it.
