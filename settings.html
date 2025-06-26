@@ -1,4 +1,3 @@
-<!-- C:\SillyTavern\public\scripts\extensions\third-party\ProsePolisher\settings.html -->
 <div class="prose-polisher-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
@@ -21,7 +20,7 @@
                     <span><b>Enable Dynamic AI Learning:</b> Automatically detects new slop and generates new regex rules based on message frequency.</span>
                 </label>
             </div>
-             <div class="form-group"> <!-- Added this from your previous context, assuming it was meant to be here -->
+             <div class="form-group">
                 <label class="checkbox_label">
                     <input type="checkbox" id="prose_polisher_enable_global_regex">
                     <span><b>Integrate with Global Regex:</b> Add active ProsePolisher rules to ST's main regex list. (Recommended: ON)</span>
@@ -39,7 +38,7 @@
                 <button id="prose_polisher_manage_whitelist_button" class="menu_button" title="Manage a list of approved words. Phrases containing these words will be IGNORED by the frequency analyzer. (e.g., 'the', 'a', character names)">
                     <i class="fa-solid fa-check-square"></i> Manage Whitelist
                 </button>
-                <button id="prose_polisher_manage_blacklist_button" class="menu_button" title="Manage a list of banned words. Phrases containing these words will be PRIORITIZED for slop analysis and rule generation. (e.g., 'suddenly', 'began to')">
+                <button id="prose_polisher_manage_blacklist_button" class="menu_button" title="Manage a list of banned words and their weight. Phrases containing these words get a score boost, making them prioritized for slop analysis.">
                     <i class="fa-solid fa-ban"></i> Manage Blacklist
                 </button>
                  <button id="prose_polisher_clear_frequency_button" class="menu_button">
@@ -51,101 +50,138 @@
                 <button id="prose_polisher_view_frequency_button" class="menu_button" title="View the currently tracked repetitive phrases and their counts.">
                     <i class="fa-solid fa-list-ol"></i> View Frequency Data
                 </button>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; align-items: flex-end;">
                 <button id="prose_polisher_generate_rules_button" class="menu_button" title="Manually trigger AI to generate regex rules for currently identified slop candidates.">
                     <i class="fa-solid fa-wand-magic-sparkles"></i> Generate AI Rules from Analysis
                 </button>
+                <button id="prose_polisher_edit_regex_gen_prompt_button" class="menu_button" title="Edit the AI prompt used for generating regex rules.">
+                    <i class="fa-solid fa-file-pen"></i> Edit Regex Gen Prompt
+                </button>
+                <div style="display: flex; flex-direction: column; gap: 2px; flex-grow: 1; min-width: 280px;">
+                    <label for="pp_regex_gen_method_selector" style="font-weight:normal; font-size: 0.85em; margin-bottom: 0;">Regex Generation Method:</label>
+                    <select id="pp_regex_gen_method_selector" class="text_pole" style="font-size: 0.9em; padding: 4px;" title="Select how AI rules are generated after Twins' pre-screening.">
+                        <option value="single">Single Gremlin</option>
+                        <option value="twins">Iterative Twins</option>
+                    </select>
+                </div>
+                <div id="pp_regex_gen_single_gremlin_controls" style="display: flex; flex-direction: column; gap: 2px; flex-grow: 1; min-width: 250px;">
+                    <label for="pp_regex_gen_ai_selector" style="font-weight:normal; font-size: 0.85em; margin-bottom: 0;">Using Gremlin:</label>
+                    <select id="pp_regex_gen_ai_selector" class="text_pole" style="font-size: 0.9em; padding: 4px;" title="Select which Gremlin's API/Model settings will be used.">
+                        <option value="writer">Writer Gremlin</option>
+                        <option value="mama">Mama Gremlin</option>
+                        <option value="papa">Papa Gremlin</option>
+                        <option value="auditor">Auditor Gremlin</option>
+                    </select>
+                </div>
+                <div id="pp_regex_gen_iterative_twins_controls" style="display: none; flex-direction: column; gap: 2px; flex-grow: 1; min-width: 250px;">
+                    <label for="pp_regex_twins_cycles_selector" style="font-weight:normal; font-size: 0.85em; margin-bottom: 0;">Twin Refinement Cycles:</label>
+                    <select id="pp_regex_twins_cycles_selector" class="text_pole" style="font-size: 0.9em; padding: 4px;" title="Number of Vex/Vax call pairs for iterative refinement.">
+                        <option value="1">1 Cycle (Vex → Vax; 2 calls)</option>
+                        <option value="2">2 Cycles (Vex → Vax → Vex → Vax; 4 calls)</option>
+                        <option value="3">3 Cycles (...6 calls)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group" style="margin-top: 10px;">
+                <label class="checkbox_label">
+                    <input type="checkbox" id="pp_skip_triage_check">
+                    <span><b>Skip Triage/Twin Check:</b> Process regex candidates directly without AI triage/refinement.</span>
+                </label>
             </div>
             <hr>
 
             <!-- PROJECT GREMLIN SETTINGS (REFACTORED) -->
-            <h4>Project Gremlin Settings</h4>
-            <small>An experimental, multi-agent generation pipeline for maximum quality. When enabled via its toggle button, it runs automatically on every user message. This is slow and API-intensive.</small>
-            <div class="form-group">
-                <label class="checkbox_label">
-                    <input type="checkbox" id="pp_projectGremlinEnabled">
-                    <span><b>Enable Project Gremlin</b> (Controlled by UI button)</span>
-                </label>
-            </div>
+            <div id="pp_projectGremlin_settings_container">
+                <h4>Project Gremlin Settings</h4>
+                <small>An experimental, multi-agent generation pipeline for maximum quality. When enabled via its toggle button, it runs automatically on every user message. This is slow and API-intensive.</small>
+                <div class="form-group">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="pp_projectGremlinEnabled">
+                        <span><b>Enable Project Gremlin</b> (Controlled by UI button)</span>
+                    </label>
+                </div>
 
-            <!-- Papa Gremlin -->
-            <div class="pp-gremlin-role-config">
-                <label class="checkbox_label">
-                    <input type="checkbox" id="pp_gremlinPapaEnabled">
-                    <span>Papa Gremlin (Architect): <span id="pp_gremlinPapaDisplay" class="pp-api-display"></span></span>
-                </label>
-                <div class="pp-controls-wrapper">
-                    <select id="pp_gremlinPapaPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
-                    <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinPapaPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
-                    <button class="menu_button pp-select-api-btn" data-gremlin-role="papa" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
-                    <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="papa" title="Edit Papa Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
+                <!-- Papa Gremlin -->
+                <div class="pp-gremlin-role-config">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="pp_gremlinPapaEnabled">
+                        <span>Papa Gremlin (Architect): <span id="pp_gremlinPapaDisplay" class="pp-api-display"></span></span>
+                    </label>
+                    <div class="pp-controls-wrapper">
+                        <select id="pp_gremlinPapaPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
+                        <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinPapaPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
+                        <button class="menu_button pp-select-api-btn" data-gremlin-role="papa" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
+                        <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="papa" title="Edit Papa Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
+                    </div>
+                    <small>High-intelligence model for initial blueprinting.</small>
                 </div>
-                <small>High-intelligence model for initial blueprinting.</small>
-            </div>
 
-            <!-- Twin Gremlins -->
-            <div class="pp-gremlin-role-config">
-                <label class="checkbox_label">
-                     <input type="checkbox" id="pp_gremlinTwinsEnabled">
-                    <span>Twin Gremlins (Refiners): <span id="pp_gremlinTwinsDisplay" class="pp-api-display"></span></span>
-                </label>
-                <div class="pp-controls-wrapper">
-                    <select id="pp_gremlinTwinsPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
-                    <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinTwinsPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
-                    <button class="menu_button pp-select-api-btn" data-gremlin-role="twins" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
-                    <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="twins" title="Edit Twin Gremlins' Instructions"><i class="fa-solid fa-file-pen"></i></button>
+                <!-- Twin Gremlins -->
+                <div class="pp-gremlin-role-config">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="pp_gremlinTwinsEnabled">
+                        <span>Twin Gremlins (Refiners): <span id="pp_gremlinTwinsDisplay" class="pp-api-display"></span></span>
+                    </label>
+                    <div class="pp-controls-wrapper">
+                        <select id="pp_gremlinTwinsPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
+                        <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinTwinsPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
+                        <button class="menu_button pp-select-api-btn" data-gremlin-role="twins" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
+                        <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="twins" title="Edit Twin Gremlins' Instructions"><i class="fa-solid fa-file-pen"></i></button>
+                    </div>
+                    <div style="margin-top: 8px;">
+                        <label for="pp_gremlinTwinsIterations" style="margin-right: 5px; font-weight:normal; font-size: 0.9em;">Refinement Iterations (per Twin):</label>
+                        <select id="pp_gremlinTwinsIterations" class="text_pole" style="width: auto; font-size: 0.9em; padding: 4px;" title="Number of messages each Twin (Vex/Vax) will generate.">
+                            <option value="1">1 Iteration (2 total calls)</option>
+                            <option value="2">2 Iterations (4 total calls)</option>
+                            <option value="3" selected>3 Iterations (6 total calls)</option>
+                        </select>
+                        <small style="display: block; margin-top: 2px;">Controls how many refinement suggestions each Twin provides. More iterations mean more detailed (and slower) planning.</small>
+                    </div>
+                    <small>Fast model for the Vex/Vax refinement (e.g., character depth, plot progression).</small>
                 </div>
-                <div style="margin-top: 8px;">
-                    <label for="pp_gremlinTwinsIterations" style="margin-right: 5px; font-weight:normal; font-size: 0.9em;">Refinement Iterations (per Twin):</label>
-                    <select id="pp_gremlinTwinsIterations" class="text_pole" style="width: auto; font-size: 0.9em; padding: 4px;" title="Number of messages each Twin (Vex/Vax) will generate.">
-                        <option value="1">1 Iteration (2 total calls)</option>
-                        <option value="2">2 Iterations (4 total calls)</option>
-                        <option value="3" selected>3 Iterations (6 total calls)</option>
-                    </select>
-                    <small style="display: block; margin-top: 2px;">Controls how many refinement suggestions each Twin provides. More iterations mean more detailed (and slower) planning.</small>
-                </div>
-                <small>Fast model for the Vex/Vax refinement (e.g., character depth, plot progression).</small>
-            </div>
 
-            <!-- Mama Gremlin -->
-            <div class="pp-gremlin-role-config">
-                <label class="checkbox_label">
-                    <input type="checkbox" id="pp_gremlinMamaEnabled">
-                    <span>Mama Gremlin (Supervisor): <span id="pp_gremlinMamaDisplay" class="pp-api-display"></span></span>
-                </label>
-                <div class="pp-controls-wrapper">
-                    <select id="pp_gremlinMamaPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
-                    <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinMamaPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
-                    <button class="menu_button pp-select-api-btn" data-gremlin-role="mama" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
-                    <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="mama" title="Edit Mama Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
+                <!-- Mama Gremlin -->
+                <div class="pp-gremlin-role-config">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="pp_gremlinMamaEnabled">
+                        <span>Mama Gremlin (Supervisor): <span id="pp_gremlinMamaDisplay" class="pp-api-display"></span></span>
+                    </label>
+                    <div class="pp-controls-wrapper">
+                        <select id="pp_gremlinMamaPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
+                        <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinMamaPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
+                        <button class="menu_button pp-select-api-btn" data-gremlin-role="mama" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
+                        <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="mama" title="Edit Mama Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
+                    </div>
+                    <small>Balanced model for final blueprint synthesis.</small>
                 </div>
-                <small>Balanced model for final blueprint synthesis.</small>
-            </div>
 
-            <!-- Writer Gremlin -->
-            <div class="pp-gremlin-role-config">
-                <label>Writer Gremlin: <span id="pp_gremlinWriterDisplay" class="pp-api-display"></span></label>
-                <div class="pp-controls-wrapper">
-                    <select id="pp_gremlinWriterPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
-                    <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinWriterPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
-                    <button class="menu_button pp-select-api-btn" data-gremlin-role="writer" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
-                    <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="writer" title="Edit Writer Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
+                <!-- Writer Gremlin -->
+                <div class="pp-gremlin-role-config">
+                    <label>Writer Gremlin: <span id="pp_gremlinWriterDisplay" class="pp-api-display"></span></label>
+                    <div class="pp-controls-wrapper">
+                        <select id="pp_gremlinWriterPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
+                        <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinWriterPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
+                        <button class="menu_button pp-select-api-btn" data-gremlin-role="writer" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
+                        <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="writer" title="Edit Writer Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
+                    </div>
+                    <small>Creative model for writing the final response. (This step is always active)</small>
                 </div>
-                <small>Creative model for writing the final response. (This step is always active)</small>
-            </div>
 
-            <!-- Auditor Gremlin -->
-            <div class="pp-gremlin-role-config">
-                <label class="checkbox_label">
-                    <input type="checkbox" id="pp_gremlinAuditorEnabled">
-                    <span>Auditor Gremlin (Editor): <span id="pp_gremlinAuditorDisplay" class="pp-api-display"></span></span>
-                </label>
-                <div class="pp-controls-wrapper">
-                    <select id="pp_gremlinAuditorPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
-                    <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinAuditorPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
-                    <button class="menu_button pp-select-api-btn" data-gremlin-role="auditor" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
-                    <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="auditor" title="Edit Auditor Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
+                <!-- Auditor Gremlin -->
+                <div class="pp-gremlin-role-config">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="pp_gremlinAuditorEnabled">
+                        <span>Auditor Gremlin (Editor): <span id="pp_gremlinAuditorDisplay" class="pp-api-display"></span></span>
+                    </label>
+                    <div class="pp-controls-wrapper">
+                        <select id="pp_gremlinAuditorPreset" class="text_pole" title="Select a parameter preset (temp, top_p, etc.)"></select>
+                        <button class="menu_button pp-browse-gremlin-preset-btn" data-target-select="pp_gremlinAuditorPreset" title="Browse Presets"><i class="fa-solid fa-folder-open"></i></button>
+                        <button class="menu_button pp-select-api-btn" data-gremlin-role="auditor" title="Select API & Model"><i class="fa-solid fa-satellite-dish"></i></button>
+                        <button class="menu_button pp-edit-instructions-btn" data-gremlin-role="auditor" title="Edit Auditor Gremlin's Instructions"><i class="fa-solid fa-file-pen"></i></button>
+                    </div>
+                    <small>Optional final line-editor to fix prose, repetition, and quality. Receives the writer's output and rewrites it before displaying.</small>
                 </div>
-                <small>Optional final line-editor to fix prose, repetition, and quality. Receives the writer's output and rewrites it before displaying.</small>
             </div>
 
         </div>

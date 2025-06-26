@@ -2,20 +2,19 @@
 import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
-import { openai_setting_names } from '../../../../scripts/openai.js';
+// Import the chat_completion_sources object and setting names from openai.js
+import { openai_setting_names, chat_completion_sources } from '../../../../scripts/openai.js';
 
 // Local module imports
 import { PresetNavigator, injectNavigatorModal } from './navigator.js';
 import {
     runGremlinPlanningPipeline, applyGremlinEnvironment, executeGen,
-    // Import default prompts from projectgremlin.js for UI consistency
     DEFAULT_PAPA_INSTRUCTIONS as PG_DEFAULT_PAPA_INSTRUCTIONS,
     DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE as PG_DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE,
     DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE as PG_DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE,
     DEFAULT_MAMA_INSTRUCTIONS as PG_DEFAULT_MAMA_INSTRUCTIONS
 } from './projectgremlin.js';
 import { Analyzer } from './analyzer.js';
-// commonWords and defaultNames are imported by analyzer.js, no need here directly
 
 // 1. CONFIGURATION AND STATE
 // -----------------------------------------------------------------------------
@@ -23,13 +22,14 @@ export const EXTENSION_NAME = "ProsePolisher";
 const LOG_PREFIX = `[${EXTENSION_NAME}]`;
 const EXTENSION_FOLDER_PATH = `scripts/extensions/third-party/${EXTENSION_NAME}`;
 const PROSE_POLISHER_ID_PREFIX = '_prosePolisherRule_';
-const PRUNE_CHECK_INTERVAL = 10; // For Analyzer, used in onAiCharacterMessageRendered
+const PRUNE_CHECK_INTERVAL = 10;
+const GREMLIN_ROLES = ['papa', 'twins', 'mama', 'writer', 'auditor'];
 
 // --- State Variables ---
 let staticRules = [];
-let dynamicRules = []; // For Prose Polisher Regex
-let regexNavigator; // For Prose Polisher Regex Navigator
-let prosePolisherAnalyzer = null; // Instance of the Analyzer class
+let dynamicRules = [];
+let regexNavigator;
+let prosePolisherAnalyzer = null;
 
 // Gremlin-specific state variables
 let isPipelineRunning = false;
@@ -38,98 +38,100 @@ let readyQueue = [];
 
 // --- DEFAULT GREMLIN PROMPT CONSTANTS for Writer & Auditor (managed within content.js) ---
 const DEFAULT_WRITER_INSTRUCTIONS_TEMPLATE = `[OOC: You are a master writer. Follow these instructions from your project lead precisely for your next response. Do not mention the blueprint or instructions in your reply. Your writing should be creative and engaging, bringing this plan to life. Do not write from the user's perspective. Write only the character's response.\n\n# INSTRUCTIONS\n{{BLUEPRINT}}]`;
-const DEFAULT_AUDITOR_INSTRUCTIONS_TEMPLATE = `[OOC: You are a master line editor. Your task is to revise and polish the following text. Correct any grammatical errors, awkward phrasing, or typos. Eliminate repetitive words and sentence structures. Enhance the prose to be more evocative and impactful, while respecting the established character voice and tone. If the text is fundamentally flawed or completely fails to follow the narrative, rewrite it from scratch to be high quality. **CRUCIAL:** Your output must ONLY be the final, edited text. Do NOT include any commentary, explanations, or introductory phrases like "Here is the revised version:".\n\n# TEXT TO EDIT\n{{WRITER_PROSE}}]`;
+const DEFAULT_AUDITOR_INSTRUCTIONS_TEMPLATE = `[OOC: You are a master line editor. Your task is to revise and polish the following text. Correct any grammatical errors, awkward phrasing, or typos. Eliminate repetitive words and sentence structures. Enhance the prose to be more evocative and impactful, while respecting the established character voice and tone. If the text is fundamentally flawed or completely fails to follow the narrative, rewrite it from scratch to be high quality. **CRUCIAL:** Your output must ONLY be the final, edited text. Do NOT include any commentary, explanations, or introductory phrases like "Here is the revised version:".
 
+# TEXT TO EDIT
+{{WRITER_PROSE}}]`;
 
-// SUGGESTED_MODELS
-const SUGGESTED_MODELS = {
-    papa: [
-        { name: "Claude 4.0 Opus (Anthropic API)", api: "claude", model: "claude-4.0-opus-20240627" },
-        { name: "Gemini 2.5 Pro (Google API)", api: "google", model: "gemini-2.5-pro" },
-        { name: "DeepSeek Reasoning R1 (DeepSeek API)", api: "openai", source: "DeepSeek", model: "deepseek-r1-reasoning-20240615" },
-        { name: "GPT-4o (OpenAI API)", api: "openai", model: "gpt-4o" },
-    ],
-    twins: [
-        { name: "Claude 3.7 Haiku (Anthropic API)", api: "claude", model: "claude-3.7-haiku-20240627" },
-        { name: "Gemini 2.5 Flash Lite (Google API)", api: "google", model: "gemini-2.5-flash-lite-preview-06-17" },
-        { name: "Llama 3.1 8B (Free / OpenRouter)", api: "openrouter", model: "meta-llama/llama-3.1-8b-instruct:free" },
-        { name: "Gemma 3 4B (Free / OpenRouter)", api: "openrouter", model: "google/gemma-3-4b-it:free" },
-    ],
-    mama: [
-        { name: "Claude 3.7 Sonnet (Anthropic API)", api: "claude", model: "claude-3.7-sonnet" },
-        { name: "Gemini 2.5 Flash (Google API)", api: "google", model: "gemini-2.5-flash" },
-        { name: "DeepSeek R1 (Free / OpenRouter)", api: "openrouter", model: "deepseek/deepseek-r1-0528:free" },
-        { name: "GPT-4o Mini (OpenAI API)", api: "openai", model: "gpt-4o-mini" },
-    ],
-    writer: [
-        { name: "Claude 4.0 Opus (Anthropic API)", api: "claude", model: "claude-4.0-opus-20240627" },
-        { name: "Nous Hermes 3 405B (OpenRouter)", api: "openrouter", model: "nousresearch/hermes-3-llama-3.1-405b" },
-        { name: "Qwen3 235B A22B (Free / OpenRouter)", api: "openrouter", model: "qwen/qwen3-235b-a22b:free" },
-        { name: "WizardLM-2 8x22B (OpenRouter)", api: "openrouter", model: "microsoft/wizardlm-2-8x22b" },
-        { name: "Gemma 3 27B (Free / OpenRouter)", api: "openrouter", model: "google/gemma-3-27b-it:free" },
-        { name: "DeepSeek R1 (Free / OpenRouter)", api: "openrouter", model: "deepseek/deepseek-r1-0528:free" },
-        { name: "DeepSeek R1T Chimera (Free / OpenRouter)", api: "openrouter", model: "tngtech/deepseek-r1t-chimera:free" },
-        { name: "QwQ 32B RPR (Free / OpenRouter)", api: "openrouter", model: "arliai/qwq-32b-arliai-rpr-v1:free" },
-        { name: "Mistral Nemo (Free / OpenRouter)", api: "openrouter", model: "mistralai/mistral-nemo:free" },
-    ],
-    auditor: [
-        { name: "Claude 4.0 Opus (Anthropic API)", api: "claude", model: "claude-4.0-opus-20240627" },
-        { name: "Gemini 2.5 Pro (Google API)", api: "google", model: "gemini-2.5-pro" },
-        { name: "GPT-4o (OpenAI API)", api: "openai", model: "gpt-4o" },
-    ],
-};
+const DEFAULT_REGEX_GENERATION_INSTRUCTIONS = `You are an expert in natural language processing and JavaScript regular expressions. Your task is to analyze the provided text and identify repetitive phrases or "slop" that can be replaced with more concise, varied, or evocative language.
 
+For each identified phrase, create a JavaScript regular expression (regex) that can accurately find it, and a replacement string. The replacement string MUST use the {{random:option1,option2,option3,...}} syntax to provide at least 15 wildly different, contextually appropriate, and grammatically correct alternative phrases. These alternatives should offer significant stylistic variation while maintaining the original meaning.
+
+**Crucial Considerations:**
+1.  **Pronoun Handling:** Your regex MUST account for different pronouns (e.g., "his", "her", "their", "my", "your", "he", "she", "they", "I", "you"). Use capture groups (e.g., \`([Hh]is|[Hh]er|[Tt]heir)\`) and backreferences (e.g., \`$1\`) in the replacement string to ensure the correct pronoun is used.
+2.  **Combined Phrases:** If a single regex cannot account for all variations of a combined phrase (e.g., "his face paled" and "his knuckles whitened" are often related to fear but are distinct actions), split them into two separate regex rules, each with its own set of 15+ variations.
+3.  **Output Format:** Provide your output STRICTLY as a JSON array of objects. Each object MUST have the following properties:
+    *   \`scriptName\`: A descriptive name for the rule (e.g., "Slopfix - Repetitive Blushing").
+    *   \`findRegex\`: The JavaScript regular expression string.
+    *   \`replaceString\`: The replacement string using the \`{{random:...}}\` syntax.
+
+**Examples of Desired Output (Truncated for brevity, but your output should have 15+ options):**
+
+\`\`\`json
+[
+    {
+        "scriptName": "Slopfix - Repetitive Blushing",
+        "findRegex": "\\\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+(cheeks?|face)\\\\s+(?:flushed|bloomed|burned|turned|grew|went)(?:\\\\s+(?:a\\\\s+)?(vibrant|deep|intense|bright|fiery|dark|faint|pale|rosy))?\\\\s*(rose|pink|crimson|scarlet|red)\\\\b",
+        "replaceString": "{{random:a telltale heat bloomed high on \\$1 \\$2,color flooded \\$1 cheeks like spilled wine,a sudden warmth crept up \\$1 neck,\\$1's \\$2 grew hot beneath the gaze,heat prickled across \\$1 \\$2,a rush of betraying color rose on \\$1 face,...}}"
+    },
+    {
+        "scriptName": "Slopfix - Breath Hitching/Gasping",
+        "findRegex": "\\\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+(?:own\\\\s+)?breath\\\\s+(hitched|caught|stuttered)(?:\\\\s+in\\\\s+\\\\1\\\\s+throat)?\\\\b",
+        "replaceString": "{{random:\\$1 drew a sharp, audible breath,a small involuntary sound escaped \\$1 throat,\\$1's breathing momentarily faltered,\\$1 inhaled sharply as if stung,air caught in \\$1 chest like a snag,...}}"
+    }
+]
+\`\`\`
+Do NOT include any other text or commentary in your response, only the JSON array.`;
 
 const defaultSettings = {
-    isStaticEnabled: true,
-    isDynamicEnabled: false,
-    dynamicTriggerCount: 30,
-    dynamicRules: [],
-    whitelist: [],
-    blacklist: [],
-    integrateWithGlobalRegex: true,
+    regexGenerationInstructions: '',
 
     projectGremlinEnabled: false,
     gremlinPapaEnabled: true,
     gremlinTwinsEnabled: true,
     gremlinMamaEnabled: true,
-    gremlinTwinsIterations: 3,
+    gremlinTwinsIterations: 3, // For blueprint refinement, distinct from regexTwinsCycles
     gremlinAuditorEnabled: false,
 
     gremlinPapaPreset: 'Default',
     gremlinPapaApi: 'claude',
-    gremlinPapaModel: 'claude-4.0-opus-20240627',
+    gremlinPapaModel: 'claude-3-opus-20240229',
     gremlinPapaSource: '',
-    gremlinPapaInstructions: '', // NEW: Empty means use default from projectgremlin.js
+    gremlinPapaCustomUrl: '',
+    gremlinPapaInstructions: '',
 
     gremlinTwinsPreset: 'Default',
     gremlinTwinsApi: 'google',
-    gremlinTwinsModel: 'gemini-2.5-flash-lite-preview-06-17',
+    gremlinTwinsModel: 'gemini-1.5-flash-latest',
     gremlinTwinsSource: '',
-    gremlinTwinsVexInstructionsBase: '', // NEW
-    gremlinTwinsVaxInstructionsBase: '', // NEW
+    gremlinTwinsCustomUrl: '',
+    gremlinTwinsVexInstructionsBase: '',
+    gremlinTwinsVaxInstructionsBase: '',
 
     gremlinMamaPreset: 'Default',
     gremlinMamaApi: 'claude',
-    gremlinMamaModel: 'claude-3.7-sonnet',
+    gremlinMamaModel: 'claude-3-sonnet-20240229',
     gremlinMamaSource: '',
-    gremlinMamaInstructions: '', // NEW
+    gremlinMamaCustomUrl: '',
+    gremlinMamaInstructions: '',
 
     gremlinWriterPreset: 'Default',
     gremlinWriterApi: 'openrouter',
-    gremlinWriterModel: 'nousresearch/hermes-3-llama-3.1-405b',
+    gremlinWriterModel: 'nousresearch/hermes-2-pro-llama-3-8b',
     gremlinWriterSource: '',
-    gremlinWriterInstructionsTemplate: '', // NEW
+    gremlinWriterCustomUrl: '',
+    gremlinWriterInstructionsTemplate: '',
 
     gremlinAuditorPreset: 'Default',
     gremlinAuditorApi: 'openai',
-    gremlinAuditorModel: 'gpt-4o',
+    gremlinAuditorModel: 'gpt-4-turbo',
     gremlinAuditorSource: '',
-    gremlinAuditorInstructionsTemplate: '', // NEW
+    gremlinAuditorCustomUrl: '',
+    gremlinAuditorInstructionsTemplate: '',
 };
 
 // 2. HELPER FUNCTIONS (Prose Polisher - UI & Rule Management)
 // -----------------------------------------------------------------------------
+
+function getCompiledRegexes() {
+    const settings = extension_settings[EXTENSION_NAME];
+    const rulesToCompile = [];
+    if (settings.isStaticEnabled) rulesToCompile.push(...staticRules.filter(r => !r.disabled));
+    if (settings.isDynamicEnabled) rulesToCompile.push(...dynamicRules.filter(r => !r.disabled));
+    return rulesToCompile.map(rule => {
+        try { return new RegExp(rule.findRegex, 'i'); } catch (e) { return null; }
+    }).filter(Boolean);
+};
 
 function compileInternalActiveRules() {
     const settings = extension_settings[EXTENSION_NAME];
@@ -141,22 +143,6 @@ function compileInternalActiveRules() {
         rules.push(...dynamicRules.filter(r => !r.disabled));
     }
     console.log(`${LOG_PREFIX} Request to compile internal active rules. Active: ${rules.length}. Global integration: ${settings.integrateWithGlobalRegex}`);
-}
-
-
-function isPhraseHandledByAnyActiveRule(phrase) {
-    const settings = extension_settings[EXTENSION_NAME];
-    const rulesToCheck = [];
-    if (settings.isStaticEnabled) rulesToCheck.push(...staticRules.filter(r => !r.disabled));
-    if (settings.isDynamicEnabled) rulesToCheck.push(...dynamicRules.filter(r => !r.disabled));
-
-    for (const rule of rulesToCheck) {
-        try {
-            const regex = new RegExp(rule.findRegex, 'i');
-            if (regex.test(phrase)) return true;
-        } catch (e) { /* ignore invalid regex */ }
-    }
-    return false;
 }
 
 function applyProsePolisherReplacements(text) {
@@ -194,7 +180,6 @@ function applyProsePolisherReplacements(text) {
     return replacedText;
 }
 
-
 async function updateGlobalRegexArray() {
     const settings = extension_settings[EXTENSION_NAME];
     if (!isAppReady) {
@@ -202,34 +187,45 @@ async function updateGlobalRegexArray() {
         return;
     }
 
+    // Always filter first to ensure a clean slate
     if (!extension_settings.regex) extension_settings.regex = [];
     extension_settings.regex = extension_settings.regex.filter(rule => !rule.id?.startsWith(PROSE_POLISHER_ID_PREFIX));
 
-    if (!settings.integrateWithGlobalRegex) {
+    // Add rules back only if integration is enabled
+    if (settings.integrateWithGlobalRegex) {
+        const rulesToAdd = [];
+        if (settings.isStaticEnabled) {
+            rulesToAdd.push(...staticRules);
+        }
+        if (settings.isDynamicEnabled) {
+            rulesToAdd.push(...dynamicRules);
+        }
+        
+        const activeRulesForGlobal = rulesToAdd.filter(rule => !rule.disabled);
+
+        for (const rule of activeRulesForGlobal) {
+            const globalRule = {
+                id: `${PROSE_POLISHER_ID_PREFIX}${rule.id || rule.scriptName.replace(/\s+/g, '_')}`,
+                scriptName: `(PP) ${rule.scriptName}`,
+                findRegex: rule.findRegex,
+                replaceString: rule.replaceString,
+                disabled: rule.disabled,
+                substituteRegex: 0, minDepth: null, maxDepth: null, trimStrings: [],
+                placement: [2], runOnEdit: false, is_always_applied_to_display: true, is_always_applied_to_prompt: true,
+            };
+            extension_settings.regex.push(globalRule);
+        }
+        console.log(`${LOG_PREFIX} Updated global regex array. ProsePolisher rules active in global list: ${activeRulesForGlobal.length}.`);
+    } else {
         console.log(`${LOG_PREFIX} Global regex integration is OFF. ProsePolisher rules removed from global list.`);
-        saveSettingsDebounced();
-        return;
     }
 
-    const rulesToAdd = [];
-    if (settings.isStaticEnabled) rulesToAdd.push(...staticRules);
-    if (settings.isDynamicEnabled) rulesToAdd.push(...dynamicRules);
-    const activeRulesForGlobal = rulesToAdd.filter(rule => !rule.disabled);
-
-    for (const rule of activeRulesForGlobal) {
-        const globalRule = {
-            id: `${PROSE_POLISHER_ID_PREFIX}${rule.id || rule.scriptName.replace(/\s+/g, '_')}`,
-            scriptName: `(PP) ${rule.scriptName}`,
-            findRegex: rule.findRegex,
-            replaceString: rule.replaceString,
-            disabled: rule.disabled,
-            substituteRegex: 0, minDepth: null, maxDepth: null, trimStrings: [],
-            placement: [2], runOnEdit: false, is_always_applied_to_display: true, is_always_applied_to_prompt: true,
-        };
-        extension_settings.regex.push(globalRule);
-    }
-    console.log(`${LOG_PREFIX} Updated global regex array. ProsePolisher rules active in global list: ${activeRulesForGlobal.length}.`);
     saveSettingsDebounced();
+
+    // Update the analyzer's internal regex list
+    if (prosePolisherAnalyzer) {
+        prosePolisherAnalyzer.compiledRegexes = getCompiledRegexes();
+    }
 }
 
 function hideRulesInStandardUI() {
@@ -245,45 +241,236 @@ function hideRulesInStandardUI() {
     });
 }
 
+let reloadPromptTimeout;
+function showReloadPrompt() {
+    clearTimeout(reloadPromptTimeout);
+    const existingPrompt = document.getElementById('prose-polisher-reload-prompt');
+    if (existingPrompt) { existingPrompt.remove(); }
+
+    const promptDiv = document.createElement('div');
+    promptDiv.id = 'prose-polisher-reload-prompt';
+    promptDiv.style.cssText = `
+        position: absolute;
+        top: 10px; /* Adjust this value as needed for visual placement */
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: rgba(0, 0, 0, 0.7); /* Semi-transparent dark background */
+        color: var(--pp-text-color);
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-family: sans-serif;
+        border: 1px solid var(--pp-border-color);
+        width: fit-content; /* Ensure it doesn't stretch too wide */
+        white-space: nowrap; /* Prevent text wrapping */
+    `;
+    promptDiv.innerHTML = `
+        <span>Settings changed. Reload to apply?</span>
+        <button id="prose-polisher-reload-button" style="
+            background-color: var(--pp-accent-color);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.2s;
+        ">Reload Now</button>
+    `;
+
+    // Add hover effect for the button
+    const reloadButton = promptDiv.querySelector('#prose-polisher-reload-button');
+    if (reloadButton) {
+        reloadButton.addEventListener('mouseenter', () => {
+            reloadButton.style.backgroundColor = 'var(--pp-accent-hover)';
+        });
+        reloadButton.addEventListener('mouseleave', () => {
+            reloadButton.style.backgroundColor = 'var(--pp-accent-color)';
+        });
+    }
+
+    // Find the insertion point within the extension's settings HTML
+    const globalRegexToggle = document.getElementById('prose_polisher_enable_global_regex');
+    let insertionPoint = null;
+    if (globalRegexToggle) {
+        let currentElement = globalRegexToggle.closest('.form-group');
+        if (currentElement) {
+            currentElement = currentElement.nextElementSibling; // This should be the <hr>
+            if (currentElement && currentElement.tagName === 'HR') {
+                insertionPoint = currentElement;
+            }
+        }
+    }
+
+    const drawerContent = document.querySelector('.prose-polisher-settings .inline-drawer-content');
+
+    if (drawerContent) {
+        drawerContent.style.position = 'relative'; // Ensure parent is relative for absolute positioning
+        if (insertionPoint && insertionPoint.parentElement === drawerContent) {
+            drawerContent.insertBefore(promptDiv, insertionPoint);
+        } else {
+            // Fallback if specific HR not found, prepend to top of drawer content
+            drawerContent.prepend(promptDiv);
+        }
+    } else {
+        document.body.appendChild(promptDiv); // Ultimate fallback if extension container not found
+    }
+
+    document.getElementById('prose-polisher-reload-button').addEventListener('click', () => {
+        window.location.reload();
+    });
+
+    reloadPromptTimeout = setTimeout(() => {
+        promptDiv.remove();
+    }, 15000); // Disappear after 15 seconds
+}
+
 
 // 3. EVENT HANDLING & UI (Project Gremlin part)
 // -----------------------------------------------------------------------------
+
 async function showApiEditorPopup(gremlinRole) {
     if (!isAppReady) { window.toastr.info("SillyTavern is still loading, please wait."); return; }
     const settings = extension_settings[EXTENSION_NAME];
     const roleUpper = gremlinRole.charAt(0).toUpperCase() + gremlinRole.slice(1);
-    const suggestions = SUGGESTED_MODELS[gremlinRole] || [];
-    const currentApi = settings[`gremlin${roleUpper}Api`] || '';
+
+    // Current settings for this role
+    const currentApi = settings[`gremlin${roleUpper}Api`] || 'openai';
     const currentModel = settings[`gremlin${roleUpper}Model`] || '';
     const currentSource = settings[`gremlin${roleUpper}Source`] || '';
+    const currentCustomUrl = settings[`gremlin${roleUpper}CustomUrl`] || '';
 
-    let suggestionsHtml = suggestions.length > 0 ? `<h4>Suggestions for ${roleUpper}</h4><ul class="pp-suggestion-list">${suggestions.map(s => `<li class="pp-suggestion-item" data-api="${s.api}" data-model="${s.model}" data-source="${s.source || ''}">${s.name}</li>`).join('')}</ul><hr>` : '';
     const popupContent = document.createElement('div');
-    popupContent.innerHTML = `${suggestionsHtml}<h4>Custom API/Model</h4><div class="pp-custom-binding-inputs"><input type="text" id="pp_custom_api" class="text_pole" placeholder="API Name (e.g., openai, claude, google, openrouter)" value="${currentApi}"><input type="text" id="pp_custom_model" class="text_pole" placeholder="Exact Model Name (e.g., gpt-4o, claude-4.0-opus...)" value="${currentModel}"><input type="text" id="pp_custom_source" class="text_pole" placeholder="Source (for some OpenAI-compatibles, e.g. DeepSeek)" value="${currentSource}"></div><br><button id="pp-unbind-btn" class="menu_button is_dangerous">Clear All</button>`;
+    popupContent.innerHTML = `
+        <div class="pp-custom-binding-inputs" style="display: flex; flex-direction: column; gap: 10px;">
+            <div>
+                <label for="pp_popup_api_selector">API Provider:</label>
+                <select id="pp_popup_api_selector" class="text_pole"></select>
+            </div>
+            <div id="pp_popup_model_group">
+                <label for="pp_popup_model_selector">Model:</label>
+                <select id="pp_popup_model_selector" class="text_pole"></select>
+            </div>
+            <div id="pp_popup_custom_model_group" style="display: none;">
+                <label for="pp_popup_custom_model_input">Custom Model Name:</label>
+                <input type="text" id="pp_popup_custom_model_input" class="text_pole" placeholder="e.g., My-Fine-Tune-v1">
+            </div>
+            <div id="pp_popup_custom_url_group" style="display: none;">
+                <label for="pp_popup_custom_url_input">Custom API URL:</label>
+                <input type="text" id="pp_popup_custom_url_input" class="text_pole" placeholder="Enter your custom API URL">
+            </div>
+            <div id="pp_popup_source_group" style="display: none;">
+                <label for="pp_popup_source_input">Source (for some OpenAI-compatibles):</label>
+                <input type="text" id="pp_popup_source_input" class="text_pole" placeholder="e.g., DeepSeek">
+            </div>
+        </div>
+        <br>
+        <button id="pp-unbind-btn" class="menu_button is_dangerous">Clear All</button>
+    `;
 
-    popupContent.querySelectorAll('.pp-suggestion-item').forEach(item => {
-        item.addEventListener('pointerup', () => {
-            popupContent.querySelector('#pp_custom_api').value = item.dataset.api;
-            popupContent.querySelector('#pp_custom_model').value = item.dataset.model;
-            popupContent.querySelector('#pp_custom_source').value = item.dataset.source || '';
-            popupContent.querySelectorAll('.pp-suggestion-item').forEach(i => i.style.fontWeight = 'normal');
-            item.style.fontWeight = 'bold';
-        });
-    });
+    const apiSelect = popupContent.querySelector('#pp_popup_api_selector');
+    const modelSelect = popupContent.querySelector('#pp_popup_model_selector');
+    const modelGroup = popupContent.querySelector('#pp_popup_model_group');
+    const customModelGroup = popupContent.querySelector('#pp_popup_custom_model_group');
+    const customModelInput = popupContent.querySelector('#pp_popup_custom_model_input');
+    const customUrlGroup = popupContent.querySelector('#pp_popup_custom_url_group');
+    const customUrlInput = popupContent.querySelector('#pp_popup_custom_url_input');
+    const sourceGroup = popupContent.querySelector('#pp_popup_source_group');
+    const sourceInput = popupContent.querySelector('#pp_popup_source_input');
+
+    // Populate API Provider dropdown
+    for (const name of Object.values(chat_completion_sources)) {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, ' $1').trim();
+        apiSelect.appendChild(option);
+    }
+    apiSelect.value = currentApi;
+
+    const populateModels = (api) => {
+        modelSelect.innerHTML = '';
+        let sourceSelectorId = '';
+
+        // Map the API value to the ID of the corresponding dropdown in the main UI
+        const apiToSelectorMap = {
+            [chat_completion_sources.OPENAI]: '#model_openai_select',
+            [chat_completion_sources.CLAUDE]: '#model_claude_select',
+            [chat_completion_sources.MAKERSUITE]: '#model_google_select',
+            [chat_completion_sources.VERTEXAI]: '#model_vertexai_select',
+            [chat_completion_sources.OPENROUTER]: '#model_openrouter_select',
+            [chat_completion_sources.MISTRALAI]: '#model_mistralai_select',
+            [chat_completion_sources.GROQ]: '#model_groq_select',
+            [chat_completion_sources.COHERE]: '#model_cohere_select',
+            [chat_completion_sources.AI21]: '#model_ai21_select',
+            [chat_completion_sources.PERPLEXITY]: '#model_perplexity_select',
+            [chat_completion_sources.DEEPSEEK]: '#model_deepseek_select',
+            [chat_completion_sources.AIMLAPI]: '#model_aimlapi_select',
+            [chat_completion_sources.XAI]: '#model_xai_select',
+            [chat_completion_sources.ZEROONEAI]: '#model_01ai_select',
+            [chat_completion_sources.POLLINATIONS]: '#model_pollinations_select',
+            [chat_completion_sources.NANOGPT]: '#model_nanogpt_select',
+        };
+        sourceSelectorId = apiToSelectorMap[api];
+
+        // Toggle UI elements based on API
+        const isCustom = api === chat_completion_sources.CUSTOM;
+        modelGroup.style.display = !isCustom ? 'block' : 'none';
+        customModelGroup.style.display = isCustom ? 'block' : 'none';
+        customUrlGroup.style.display = isCustom ? 'block' : 'none';
+        sourceGroup.style.display = ['openai', 'openrouter', 'custom'].includes(api) ? 'block' : 'none';
+
+        if (sourceSelectorId) {
+            const sourceSelect = document.querySelector(sourceSelectorId);
+            if (sourceSelect) {
+                // Clone all options (including those in optgroups)
+                Array.from(sourceSelect.childNodes).forEach(node => {
+                    modelSelect.appendChild(node.cloneNode(true));
+                });
+            } else {
+                console.warn(`${LOG_PREFIX} Could not find source model selector: ${sourceSelectorId}`);
+                modelSelect.innerHTML = '<option value="">No models found in main UI</option>';
+            }
+        }
+    };
+
+    populateModels(currentApi);
+    apiSelect.addEventListener('change', () => populateModels(apiSelect.value));
+
+    modelSelect.value = currentModel;
+    customModelInput.value = currentModel;
+    customUrlInput.value = currentCustomUrl;
+    sourceInput.value = currentSource;
+
     popupContent.querySelector('#pp-unbind-btn').addEventListener('pointerup', () => {
-         popupContent.querySelector('#pp_custom_api').value = '';
-         popupContent.querySelector('#pp_custom_model').value = '';
-         popupContent.querySelector('#pp_custom_source').value = '';
-         window.toastr.info('Cleared inputs. Click "Save" to apply.');
+        apiSelect.value = 'openai';
+        populateModels('openai');
+        modelSelect.value = '';
+        customModelInput.value = '';
+        customUrlInput.value = '';
+        sourceInput.value = '';
+        window.toastr.info('Cleared inputs. Click "Save" to apply.');
     });
 
     if (await callGenericPopup(popupContent, POPUP_TYPE.CONFIRM, `Set API/Model for ${roleUpper}`)) {
-        settings[`gremlin${roleUpper}Api`] = popupContent.querySelector('#pp_custom_api').value.trim();
-        settings[`gremlin${roleUpper}Model`] = popupContent.querySelector('#pp_custom_model').value.trim();
-        settings[`gremlin${roleUpper}Source`] = popupContent.querySelector('#pp_custom_source').value.trim();
+        const selectedApi = apiSelect.value;
+        settings[`gremlin${roleUpper}Api`] = selectedApi;
+
+        if (selectedApi === chat_completion_sources.CUSTOM) {
+            settings[`gremlin${roleUpper}Model`] = customModelInput.value.trim();
+            settings[`gremlin${roleUpper}CustomUrl`] = customUrlInput.value.trim();
+        } else {
+            settings[`gremlin${roleUpper}Model`] = modelSelect.value;
+            settings[`gremlin${roleUpper}CustomUrl`] = '';
+        }
+        settings[`gremlin${roleUpper}Source`] = sourceInput.value.trim();
+
         saveSettingsDebounced();
         updateGremlinApiDisplay(gremlinRole);
-        window.toastr.info(`API/Model settings saved for ${roleUpper}.`);
+        window.toastr.success(`API/Model settings saved for ${roleUpper}.`);
     }
 }
 
@@ -312,8 +499,6 @@ async function showInstructionsEditorPopup(gremlinRole) {
     const popupContent = document.createElement('div');
     let textareasHtml = '';
 
-    // Use imported defaults from projectgremlin.js for Papa, Twins, Mama
-    // Use local defaults for Writer, Auditor
     switch (gremlinRole) {
         case 'papa':
             currentInstructions = settings.gremlinPapaInstructions || PG_DEFAULT_PAPA_INSTRUCTIONS;
@@ -359,6 +544,14 @@ async function showInstructionsEditorPopup(gremlinRole) {
             placeholdersInfo = `<small style="display:block; margin-bottom:5px;">This is a template for the Auditor Gremlin. Ensure your custom prompt includes the placeholder: <code>{{WRITER_PROSE}}</code> (the text generated by the Writer Gremlin).</small>`;
             textareasHtml = `<textarea id="pp_instructions_editor" class="text_pole" style="min-height: 300px; width: 100%; resize: vertical; box-sizing: border-box;">${currentInstructions}</textarea>`;
             break;
+        case 'regexGen':
+            currentInstructions = settings.regexGenerationInstructions || DEFAULT_REGEX_GENERATION_INSTRUCTIONS;
+            defaultInstructions = DEFAULT_REGEX_GENERATION_INSTRUCTIONS;
+            instructionSettingKey = 'regexGenerationInstructions';
+            title = 'Edit Regex Generation Prompt';
+            placeholdersInfo = `<small style="display:block; margin-bottom:5px;">This prompt is sent to the AI when generating new regex rules. It should instruct the AI on how to identify patterns and format the output. No dynamic pipeline placeholders are used within this prompt itself.</small>`;
+            textareasHtml = `<textarea id="pp_instructions_editor" class="text_pole" style="min-height: 300px; width: 100%; resize: vertical; box-sizing: border-box;">${currentInstructions}</textarea>`;
+            break;
         default:
             window.toastr.error(`Unknown Gremlin role for instruction editing: ${gremlinRole}`);
             return;
@@ -389,7 +582,6 @@ async function showInstructionsEditorPopup(gremlinRole) {
         if (gremlinRole === 'twins') {
             const vexInstructions = popupContent.querySelector('#pp_instructions_vex_editor').value;
             const vaxInstructions = popupContent.querySelector('#pp_instructions_vax_editor').value;
-            // Store empty string if it's the same as default, otherwise store the custom one.
             settings.gremlinTwinsVexInstructionsBase = (vexInstructions.trim() === PG_DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE.trim()) ? '' : vexInstructions;
             settings.gremlinTwinsVaxInstructionsBase = (vaxInstructions.trim() === PG_DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE.trim()) ? '' : vaxInstructions;
         } else {
@@ -422,30 +614,18 @@ function handleSentenceCapitalization(messageIdOrElement) {
     }
 }
 
-// START OF PROJECT GREMLIN TRIGGER LOGIC (REVERTED AND UPDATED)
-/**
- * Gatekeeper function for Gremlin pipeline.
- * Prevents main generation if pipeline is running its own /gen calls.
- */
 async function onBeforeGremlinGeneration(type, generateArgsObject, dryRun) {
     if (!isAppReady) {
-        // console.warn(`[ProjectGremlin] onBeforeGremlinGeneration called before app ready.`); // Can be noisy
         return;
     }
     if (isPipelineRunning) {
          console.log('[ProjectGremlin] Pipeline running, allowing internal /gen call by returning undefined from onBeforeGremlinGeneration.');
-         return; // Return undefined (or nothing) to allow the internal /gen call to proceed.
+         return;
     }
-    // For all other cases, let SillyTavern handle them normally.
     return;
 }
 
-/**
- * Main entry point for the Gremlin pipeline.
- * Fires after the user's message has been added to context.chat and rendered.
- * @param {string} messageId - The ID of the rendered user message.
- */
-async function onUserMessageRenderedForGremlin(messageId) { // messageId from the event
+async function onUserMessageRenderedForGremlin(messageId) {
     if (!isAppReady) {
         console.warn(`[ProjectGremlin] onUserMessageRenderedForGremlin called before app ready for message ID ${messageId}.`);
         return;
@@ -454,42 +634,19 @@ async function onUserMessageRenderedForGremlin(messageId) { // messageId from th
     const settings = extension_settings[EXTENSION_NAME];
     const context = getContext();
 
-    console.log(`[ProjectGremlin] USER_MESSAGE_RENDERED_FOR_GREMLIN triggered for message ID: ${messageId} (type: ${typeof messageId})`);
-    console.log(`[ProjectGremlin] Current chat length: ${context.chat?.length}`);
-    console.log(`[ProjectGremlin] Project Gremlin Enabled: ${settings.projectGremlinEnabled}`);
-    console.log(`[ProjectGremlin] isPipelineRunning flag: ${isPipelineRunning}`);
-
-    // --- SIMPLIFIED CONDITIONS ---
     if (!settings.projectGremlinEnabled || isPipelineRunning) {
-        console.log(`[ProjectGremlin] Pipeline start conditions FAILED for message ID ${messageId}. Aborting.`);
-        if (!settings.projectGremlinEnabled) console.log(`  - Reason: Gremlin not enabled.`);
-        if (isPipelineRunning) console.log(`  - Reason: Pipeline already running (internal call likely).`);
         return;
     }
     
-    // Optional: You can still try to get the message for logging, but don't gate on it.
-    const messageObject = context.chat?.find(msg => String(msg.id) === String(messageId));
-    if (messageObject) {
-        console.log(`[ProjectGremlin] Found message object in context: ID=${messageObject.id}, is_user=${messageObject.is_user}, name=${messageObject.name}`);
-        if (!messageObject.is_user) {
-            console.warn(`[ProjectGremlin] Warning: Message ${messageId} associated with USER_MESSAGE_RENDERED is not marked as user. Proceeding with pipeline anyway based on event timing.`);
-        }
-    } else {
-        console.warn(`[ProjectGremlin] Warning: Message object with ID ${messageId} not found in context.chat when USER_MESSAGE_RENDERED fired. Proceeding with pipeline if other conditions met.`);
-    }
-    // --- END OF SIMPLIFIED CONDITIONS ---
-    
-    console.log(`[ProjectGremlin] All primary conditions PASSED for message ID ${messageId}. Starting pipeline...`);
     isPipelineRunning = true;
 
     try {
-        const finalBlueprint = await runGremlinPlanningPipeline(); // This now uses settings internally
+        const finalBlueprint = await runGremlinPlanningPipeline();
         if (!finalBlueprint) {
             throw new Error('Project Gremlin planning failed to produce a blueprint.');
         }
 
         let finalInjectedInstruction;
-        // Resolve Writer and Auditor instruction templates
         const writerInstructionTemplateSetting = settings.gremlinWriterInstructionsTemplate;
         const writerTemplate = (writerInstructionTemplateSetting && writerInstructionTemplateSetting.trim() !== '')
             ? writerInstructionTemplateSetting
@@ -502,21 +659,17 @@ async function onUserMessageRenderedForGremlin(messageId) { // messageId from th
 
 
         if (settings.gremlinAuditorEnabled) {
-            console.log('[ProjectGremlin] Auditor enabled. Running Writer step internally...');
             window.toastr.info("Gremlin Pipeline: Step 4 - Writer is crafting...", "Project Gremlin", { timeOut: 7000 });
             if (!await applyGremlinEnvironment('writer')) throw new Error("Failed to configure Writer environment for Auditor path.");
             
             const writerSystemInstruction = writerTemplate.replace('{{BLUEPRINT}}', finalBlueprint);
             const writerProse = await executeGen(writerSystemInstruction);
             if (!writerProse.trim()) throw new Error("Internal Writer Gremlin step failed to produce a response.");
-            console.log('[ProjectGremlin] Writer Gremlin\'s Prose (for Auditor):', writerProse.substring(0,100) + "...");
 
-            console.log('[ProjectGremlin] Preparing final injection for Auditor.');
             window.toastr.info("Gremlin Pipeline: Handing off to Auditor...", "Project Gremlin", { timeOut: 4000 });
             if (!await applyGremlinEnvironment('auditor')) throw new Error("Failed to configure Auditor environment.");
             finalInjectedInstruction = auditorTemplate.replace('{{WRITER_PROSE}}', writerProse);
         } else {
-            console.log('[ProjectGremlin] Auditor disabled. Preparing final instruction for Writer.');
             window.toastr.info("Gremlin Pipeline: Handing off to Writer...", "Project Gremlin", { timeOut: 4000 });
             if (!await applyGremlinEnvironment('writer')) throw new Error("Failed to configure Writer environment.");
             finalInjectedInstruction = writerTemplate.replace('{{BLUEPRINT}}', finalBlueprint);
@@ -525,7 +678,6 @@ async function onUserMessageRenderedForGremlin(messageId) { // messageId from th
         window.toastr.success("Gremlin Pipeline: Blueprint complete! Prompt instruction prepared.", "Project Gremlin");
         const sanitizedInstruction = finalInjectedInstruction.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         await context.executeSlashCommands(`/inject id=gremlin_final_plan position=chat depth=0 "${sanitizedInstruction}"`);
-        console.log("[ProjectGremlin] Final instruction injected using 'position=chat'.");
 
     } catch (error) {
         console.error('[ProjectGremlin] A critical error occurred during the pipeline execution:', error);
@@ -534,15 +686,10 @@ async function onUserMessageRenderedForGremlin(messageId) { // messageId from th
         isPipelineRunning = false;
         if (context.reloadGenerationSettings) {
             context.reloadGenerationSettings();
-            console.log("[ProjectGremlin] Main generation settings reloaded.");
         }
-        console.log(`[ProjectGremlin] ---- USER_MESSAGE_RENDERED_FOR_GREMLIN END (Message ID: ${messageId}) ----`);
     }
 }
-// END OF PROJECT GREMLIN TRIGGER LOGIC
 
-
-// Combined AI Message Handler (Prose Polisher regex/analyzer + Gremlin cleanup if needed)
 function onAiCharacterMessageRendered(messageElement) {
     if (!isAppReady) {
         console.warn(`${LOG_PREFIX} onAiCharacterMessageRendered called too early. isAppReady: ${isAppReady}`);
@@ -550,7 +697,7 @@ function onAiCharacterMessageRendered(messageElement) {
     }
     const messageId = messageElement.getAttribute('mesid');
     const context = getContext();
-    const message = context.chat.find(msg => String(msg.id) === String(messageId)); // Ensure messageId is treated as string for comparison if needed
+    const message = context.chat.find(msg => String(msg.id) === String(messageId));
     if (!message || message.is_user) return;
 
     let messageToAnalyze = message.mes;
@@ -558,7 +705,6 @@ function onAiCharacterMessageRendered(messageElement) {
     if (!extension_settings[EXTENSION_NAME].integrateWithGlobalRegex) {
         const replacedMessage = applyProsePolisherReplacements(originalMessageForRegex);
         if (replacedMessage !== originalMessageForRegex) {
-            console.log(`${LOG_PREFIX} Applying internal Prose Polisher regex replacements.`);
             message.mes = replacedMessage;
             const mesTextElement = messageElement.querySelector('.mes_text');
             if (mesTextElement) mesTextElement.innerHTML = replacedMessage; 
@@ -586,6 +732,7 @@ class RegexNavigator {
         dynamicRules.forEach(rule => delete rule.isNew);
         const container = document.createElement('div');
         container.className = 'prose-polisher-navigator-content';
+        container.id = 'prose-polisher-navigator-content-id';
         container.innerHTML = `
             <div class="modal-header"><h2>Regex Rule Navigator</h2></div>
             <div class="navigator-body"><div class="navigator-main-panel"><div id="regex-navigator-list-view"></div></div></div>
@@ -596,7 +743,7 @@ class RegexNavigator {
     }
     renderRuleList(container = null) {
         if (!isAppReady) return;
-        const modalContent = container || document.querySelector('.popup_content .prose-polisher-navigator-content');
+        const modalContent = container || document.getElementById('prose-polisher-navigator-content-id');
         if (!modalContent) return;
         const listView = modalContent.querySelector('#regex-navigator-list-view');
         listView.innerHTML = '';
@@ -668,12 +815,10 @@ class RegexNavigator {
         if (deleteBtn) {
             deleteBtn.addEventListener('pointerup', async (e) => {
                 e.stopPropagation();
-                if (await callGenericPopup('Are you sure you want to delete this rule?', POPUP_TYPE.CONFIRM)) {
+                const editorPopup = deleteBtn.closest('.popup_confirm');
+                if (await callGenericPopup('Are you sure you want to to delete this rule?', POPUP_TYPE.CONFIRM)) {
                     await this.handleDelete(rule.id);
-                    const confirmPopup = deleteBtn.closest('.popup_confirm');
-                    const editorPopup = confirmPopup?.previousElementSibling?.closest('.popup_confirm'); 
-                    editorPopup?.querySelector('.popup-button-cancel')?.click(); 
-                    confirmPopup?.querySelector('.popup-button-cancel')?.click(); 
+                    editorPopup?.querySelector('.popup-button-cancel')?.click();
                 }
             });
         }
@@ -699,6 +844,7 @@ class RegexNavigator {
             this.renderRuleList();
             await updateGlobalRegexArray();
             window.toastr.success(isNew ? "New rule created." : "Rule updated.");
+            showReloadPrompt();
         }
     }
     async handleDelete(ruleId) {
@@ -711,6 +857,7 @@ class RegexNavigator {
             this.renderRuleList();
             await updateGlobalRegexArray();
             window.toastr.success("Dynamic rule deleted.");
+            showReloadPrompt();
         } else {
             console.warn(`${LOG_PREFIX} Dynamic rule with ID ${ruleId} not found for deletion.`);
         }
@@ -757,7 +904,7 @@ async function initializeExtensionCore() {
 
         prosePolisherAnalyzer = new Analyzer(
             settings, callGenericPopup, POPUP_TYPE, window.toastr, saveSettingsDebounced,
-            compileInternalActiveRules, isPhraseHandledByAnyActiveRule, updateGlobalRegexArray 
+            compileInternalActiveRules, updateGlobalRegexArray, getCompiledRegexes() 
         );
         
         const staticToggle = document.getElementById('prose_polisher_enable_static');
@@ -769,14 +916,29 @@ async function initializeExtensionCore() {
         triggerInput.value = settings.dynamicTriggerCount;
         if (globalRegexToggle) { 
             globalRegexToggle.checked = settings.integrateWithGlobalRegex;
-            globalRegexToggle.addEventListener('change', async () => { settings.integrateWithGlobalRegex = globalRegexToggle.checked; saveSettingsDebounced(); await updateGlobalRegexArray(); });
+            globalRegexToggle.addEventListener('change', async () => { 
+                settings.integrateWithGlobalRegex = globalRegexToggle.checked; 
+                saveSettingsDebounced(); 
+                await updateGlobalRegexArray(); 
+                const regexListContainer = document.getElementById('saved_regex_scripts');
+                if (regexListContainer) {
+                    hideRulesInStandardUI();
+                }
+                showReloadPrompt();
+            });
         }
-        staticToggle.addEventListener('change', async () => { settings.isStaticEnabled = staticToggle.checked; saveSettingsDebounced(); await updateGlobalRegexArray(); });
+        staticToggle.addEventListener('change', async () => { 
+            settings.isStaticEnabled = staticToggle.checked; 
+            saveSettingsDebounced(); 
+            await updateGlobalRegexArray(); 
+            showReloadPrompt();
+        });
         dynamicToggle.addEventListener('change', async () => {
             settings.isDynamicEnabled = dynamicToggle.checked;
             if(!dynamicToggle.checked && prosePolisherAnalyzer) prosePolisherAnalyzer.messageCounterForTrigger = 0; 
             saveSettingsDebounced();
             await updateGlobalRegexArray();
+            showReloadPrompt();
         });
         triggerInput.addEventListener('input', () => {
             const value = parseInt(triggerInput.value, 10);
@@ -791,6 +953,55 @@ async function initializeExtensionCore() {
         document.getElementById('prose_polisher_manage_whitelist_button').addEventListener('pointerup', () => prosePolisherAnalyzer?.showWhitelistManager());
         document.getElementById('prose_polisher_manage_blacklist_button').addEventListener('pointerup', () => prosePolisherAnalyzer?.showBlacklistManager());
         document.getElementById('prose_polisher_clear_frequency_button').addEventListener('pointerup', () => prosePolisherAnalyzer?.clearFrequencyData());
+        document.getElementById('prose_polisher_edit_regex_gen_prompt_button').addEventListener('pointerup', () => showInstructionsEditorPopup('regexGen'));
+
+        // Regex Generation Method Controls
+        const regexGenMethodSelector = document.getElementById('pp_regex_gen_method_selector');
+        const singleGremlinControls = document.getElementById('pp_regex_gen_single_gremlin_controls');
+        const iterativeTwinsControls = document.getElementById('pp_regex_gen_iterative_twins_controls');
+        const regexGenAiSelector = document.getElementById('pp_regex_gen_ai_selector');
+        const regexTwinsCyclesSelector = document.getElementById('pp_regex_twins_cycles_selector');
+
+        function updateRegexGenControlsVisibility() {
+            if (!isAppReady) return;
+            const method = settings.regexGenerationMethod;
+            singleGremlinControls.style.display = (method === 'single') ? 'flex' : 'none';
+            iterativeTwinsControls.style.display = (method === 'twins') ? 'flex' : 'none';
+        }
+
+        if (regexGenMethodSelector) {
+            regexGenMethodSelector.value = settings.regexGenerationMethod;
+            regexGenMethodSelector.addEventListener('change', () => {
+                settings.regexGenerationMethod = regexGenMethodSelector.value;
+                saveSettingsDebounced();
+                updateRegexGenControlsVisibility();
+            });
+        }
+        if (regexGenAiSelector) {
+            regexGenAiSelector.value = settings.regexGeneratorRole;
+            regexGenAiSelector.addEventListener('change', () => {
+                settings.regexGeneratorRole = regexGenAiSelector.value;
+                saveSettingsDebounced();
+            });
+        }
+        if (regexTwinsCyclesSelector) {
+            regexTwinsCyclesSelector.value = settings.regexTwinsCycles;
+            regexTwinsCyclesSelector.addEventListener('change', () => {
+                settings.regexTwinsCycles = parseInt(regexTwinsCyclesSelector.value, 10);
+                saveSettingsDebounced();
+            });
+        }
+        updateRegexGenControlsVisibility(); // Initial setup
+
+        const skipTriageCheck = document.getElementById('pp_skip_triage_check');
+        if (skipTriageCheck) {
+            skipTriageCheck.checked = settings.skipTriageCheck;
+            skipTriageCheck.addEventListener('change', () => {
+                settings.skipTriageCheck = skipTriageCheck.checked;
+                saveSettingsDebounced();
+            });
+        }
+
 
         let buttonContainer = document.getElementById('pp-chat-buttons-container');
         if (!buttonContainer) {
@@ -805,11 +1016,22 @@ async function initializeExtensionCore() {
         buttonContainer.insertAdjacentHTML('beforeend', `<button id="pp_gremlin_toggle" class="fa-solid fa-hat-wizard" title="Toggle Project Gremlin Pipeline"></button>`);
         const gremlinToggle = document.getElementById('pp_gremlin_toggle');
         const gremlinEnableCheckbox = document.getElementById('pp_projectGremlinEnabled');
+        const gremlinSettingsContainer = document.getElementById('pp_projectGremlin_settings_container');
+
+        const updateGremlinSettingsVisibility = () => {
+            if (gremlinSettingsContainer) {
+                gremlinSettingsContainer.style.display = gremlinEnableCheckbox.checked ? 'block' : 'none';
+            }
+        };
+
         const updateGremlinToggleState = () => {
             if (!isAppReady) return;
             const enabled = settings.projectGremlinEnabled;
             gremlinToggle?.classList.toggle('active', enabled);
-            if (gremlinEnableCheckbox) gremlinEnableCheckbox.checked = enabled;
+            if (gremlinEnableCheckbox) {
+                gremlinEnableCheckbox.checked = enabled;
+                updateGremlinSettingsVisibility(); // Update visibility when state changes
+            }
         };
         const toggleGremlin = () => {
             if (!isAppReady) { window.toastr.warning("SillyTavern is not fully ready yet."); return; }
@@ -824,6 +1046,7 @@ async function initializeExtensionCore() {
                  settings.projectGremlinEnabled = e.target.checked;
                  saveSettingsDebounced();
                  updateGremlinToggleState();
+                 updateGremlinSettingsVisibility(); // Ensure visibility updates on direct checkbox change
             }
         });
         document.getElementById('pp_gremlinPapaEnabled').checked = settings.gremlinPapaEnabled;
@@ -862,7 +1085,7 @@ async function initializeExtensionCore() {
                 });
 
                 const presetOptions = ['<option value="Default">Default</option>', ...Object.keys(openai_setting_names).map(name => `<option value="${name}">${name}</option>`)].join('');
-                ['papa', 'twins', 'mama', 'writer', 'auditor'].forEach(role => {
+                GREMLIN_ROLES.forEach(role => {
                     const roleUpper = role.charAt(0).toUpperCase() + role.slice(1);
                     const presetSelectId = `pp_gremlin${roleUpper}Preset`;
                     const presetSelect = document.getElementById(presetSelectId);
@@ -877,14 +1100,14 @@ async function initializeExtensionCore() {
                     if (apiBtn) apiBtn.addEventListener('pointerup', () => showApiEditorPopup(role));
                     updateGremlinApiDisplay(role);
 
-                    // NEW: Add event listener for "Edit Instructions" button
                     const editInstructionsBtn = document.querySelector(`.pp-edit-instructions-btn[data-gremlin-role="${role}"]`);
                     if (editInstructionsBtn) {
                         editInstructionsBtn.addEventListener('pointerup', () => showInstructionsEditorPopup(role));
                     }
                 });
                 updateGremlinToggleState();
-                console.log(`${LOG_PREFIX} Gremlin preset dropdowns populated and instruction editors bound.`);
+                updateRegexGenControlsVisibility(); // Ensure correct visibility after app ready
+                updateGremlinSettingsVisibility(); // Initial visibility setup for Gremlin settings
             } catch (err) { console.error(`${LOG_PREFIX} Error populating Gremlin preset dropdowns or binding instruction editors:`, err); }
 
             eventSource.on(event_types.GENERATION_AFTER_COMMANDS, onBeforeGremlinGeneration);
@@ -899,9 +1122,7 @@ async function initializeExtensionCore() {
                 observer.observe(regexListContainer, { childList: true, subtree: true });
                 hideRulesInStandardUI();
             }
-            console.log(`${LOG_PREFIX} Core event listeners bound and initial updates done.`);
         });
-        console.log(`${LOG_PREFIX} Core components initialized.`);
     } catch (error) {
         console.error(`${LOG_PREFIX} Critical failure during core initialization:`, error);
         window.toastr.error("Prose Polisher failed to initialize core components. See console.");

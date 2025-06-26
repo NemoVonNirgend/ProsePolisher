@@ -1,24 +1,43 @@
 // C:\SillyTavern\public\scripts\extensions\third-party\ProsePolisher\projectgremlin.js
 import { extension_settings, getContext } from '../../../extensions.js';
 
-// CONNECT_API_MAP updated for direct API calls and based on ST screenshot
+// **THE FIX IS HERE**
+// This map correctly translates the API key from the UI dropdown (e.g., 'makersuite')
+// to the string that SillyTavern's /api slash command expects (e.g., 'google').
 const CONNECT_API_MAP = {
-    // Keys are lowercase strings as they likely appear in ProsePolisher extension settings dropdowns
-    // 'selected' is the exact string SillyTavern's /api command expects
+    // Standard Cloud APIs
+    openai: { selected: 'openai' },
+    claude: { selected: 'claude' },
+    openrouter: { selected: 'openrouter' },
+    mistralai: { selected: 'mistral' }, // UI key is 'mistralai', command is 'mistral'
+    deepseek: { selected: 'deepseek' },
+    cohere: { selected: 'cohere' },
+    groq: { selected: 'groq' },
+    xai: { selected: 'xai' },
+    perplexity: { selected: 'perplexity' },
+    '01ai': { selected: '01ai' },
+    aimlapi: { selected: 'aimlapi' },
+    pollinations: { selected: 'pollinations' },
 
-    openai: { selected: 'openai' },          // Matches image
-    claude: { selected: 'claude' },          // Matches image
-    google: { selected: 'google' },          // Matches image
-    openrouter: { selected: 'openrouter' },  // CORRECTED: Uses direct /api openrouter
-    deepseek: { selected: 'deepseek' },      // CORRECTED: Uses direct /api deepseek (assuming setting key is 'deepseek')
-    koboldai: { selected: 'kobold' },        // CORRECTED: Setting 'koboldai' maps to ST '/api kobold'
-    novelai: { selected: 'novel' },          // CORRECTED: Setting 'novelai' maps to ST '/api novel'
-    textgenerationwebui: { selected: 'ooba' }, // CORRECTED: Setting 'textgenerationwebui' maps to ST '/api ooba'
+    // Google APIs (both use the 'google' command)
+    makersuite: { selected: 'google' },
+    vertexai: { selected: 'google' },
 
-    // Add other mappings here if your extension settings offer more APIs from the screenshot
-    // Example: if you have 'Ollama' in your dropdown:
-    // ollama: { selected: 'ollama' },
+    // Local / Self-Hosted APIs
+    textgenerationwebui: { selected: 'ooba' },
+    koboldcpp: { selected: 'koboldcpp' },
+    llamacpp: { selected: 'llamacpp' },
+    ollama: { selected: 'ollama' },
+    vllm: { selected: 'vllm' },
+
+    // Other/Special
+    nanogpt: { selected: 'nanogpt' },
+    scale: { selected: 'scale' },
+    windowai: { selected: 'windowai' },
+    ai21: { selected: 'ai21' },
+    custom: { selected: 'custom' },
 };
+
 
 // --- DEFAULT GREMLIN PROMPT CONSTANTS (Exported for use in content.js UI) ---
 export const DEFAULT_PAPA_INSTRUCTIONS = `[OOC: You are Papa Gremlin, The Architect. Your primary objective is to craft a **high-level, flexible, and RULE-ADHERENT blueprint** for the *next character response*. This blueprint will serve as a foundational guide for subsequent refinement and writing stages. You operate with the understanding that the final output will be used in a sophisticated roleplaying environment with strict rules.
@@ -128,18 +147,21 @@ This is the most crucial part of your role. You must rigorously audit the synthe
 ]`;
 
 
-// applyGremlinEnvironment uses the more robust source_field logic from the previous iteration
 export async function applyGremlinEnvironment(role) {
     if (typeof window.isAppReady === 'undefined' || !window.isAppReady) {
         console.warn(`[ProjectGremlin] applyGremlinEnvironment called for ${role} before app ready.`);
-        // return false; // Or throw
+        return false;
     }
     const settings = extension_settings.ProsePolisher;
     const roleUpper = role.charAt(0).toUpperCase() + role.slice(1);
     const presetName = settings[`gremlin${roleUpper}Preset`];
-    const apiNameSetting = settings[`gremlin${roleUpper}Api`]; // Raw value from settings
+    const apiNameSetting = settings[`gremlin${roleUpper}Api`];
     const modelName = settings[`gremlin${roleUpper}Model`];
-    const source = settings[`gremlin${roleUpper}Source`]; // User-defined source from settings
+    // Use the specific custom URL for the role if the API is 'custom'
+    const source = (apiNameSetting === 'custom') 
+        ? settings[`gremlin${roleUpper}CustomUrl`] 
+        : settings[`gremlin${roleUpper}Source`];
+
     const commands = [];
 
     if (presetName && presetName !== 'Default') {
@@ -149,35 +171,18 @@ export async function applyGremlinEnvironment(role) {
     }
 
     if (apiNameSetting) {
-        const apiNameKey = apiNameSetting.toLowerCase(); // Use lowercase for map lookup
+        const apiNameKey = apiNameSetting.toLowerCase();
         const apiConfig = CONNECT_API_MAP[apiNameKey];
 
         if (apiConfig) {
             commands.push(`/api ${apiConfig.selected}`);
             if (modelName) {
                 let sourceCommand = '';
-                // The source_field parameter is generally applicable to SillyTavern's 'openai' API type
-                // when routing to various OpenAI-compatible endpoints.
-                if (apiConfig.selected === 'openai') {
-                    let sourceValueToUse = null;
-
-                    // Prioritize requiredSourceField from CONNECT_API_MAP (if any)
-                    // (Note: We removed this for 'openrouter' as it now uses its direct API)
-                    if (apiConfig.requiredSourceField) {
-                        sourceValueToUse = apiConfig.requiredSourceField;
-                    }
-                    // Fallback to user-defined source from settings if no requiredSourceField
-                    else if (source && source.trim() !== '') {
-                        sourceValueToUse = source.trim();
-                    }
-
-                    if (sourceValueToUse) {
-                        sourceCommand = ` source_field=${sourceValueToUse}`;
-                    }
+                // The source_field is only needed for 'custom' API type now
+                if (apiConfig.selected === 'custom' && source) {
+                    sourceCommand = ` source_field=${source}`;
                 }
-                // For other direct APIs (like /api openrouter, /api ooba), source_field is typically not needed
-                // with the /model command, as the API context is already set.
-
+                
                 commands.push(`/model "${modelName}"${sourceCommand}`);
             } else {
                 console.log(`[ProjectGremlin] No specific Model configured for ${roleUpper} with API ${apiNameSetting}.`);
@@ -213,8 +218,6 @@ export async function applyGremlinEnvironment(role) {
     return true;
 }
 
-// executeGen remains the same as your last provided version
-// (including isAppReady checks)
 export async function executeGen(promptText) {
     if (typeof window.isAppReady === 'undefined' || !window.isAppReady) {
         console.warn(`[ProjectGremlin] executeGen called before app ready.`);

@@ -3,7 +3,8 @@ import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import { openai_setting_names } from '../../../../scripts/openai.js';
 
 const LOG_PREFIX = `[ProsePolisher:Navigator]`;
-const NEMO_METADATA_KEY = 'nemoNavigatorMetadata'; // Used for folder structure and API bindings
+// CHANGED: Using a unique localStorage key to prevent conflicts with other extensions.
+const PROSE_POLISHER_METADATA_KEY = 'prosePolisherNavigatorMetadata';
 
 function generateUUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -14,6 +15,7 @@ function generateUUID() {
 
 export function injectNavigatorModal() {
     if (document.getElementById('pp-preset-navigator-modal')) return;
+    // CHANGED: All 'id' attributes are now prefixed with 'pp-' to ensure they are unique.
     const modalHTML = `
     <div id="pp-preset-navigator-modal" style="display:none;">
         <div class="modal-content">
@@ -23,25 +25,25 @@ export function injectNavigatorModal() {
             </div>
             <div class="navigator-body">
                 <div class="navigator-main-panel">
-                    <div id="navigator-grid-header">
-                        <div id="navigator-breadcrumbs"></div>
-                        <div id="navigator-header-controls">
-                            <div id="navigator-search-controls">
-                                <input type="search" id="navigator-search-input" class="text_pole" placeholder="Search presets...">
-                                <button id="navigator-search-clear" title="Clear Search" class="menu_button"><i class="fa-solid fa-times"></i></button>
+                    <div id="pp-navigator-grid-header">
+                        <div id="pp-navigator-breadcrumbs"></div>
+                        <div id="pp-navigator-header-controls">
+                            <div id="pp-navigator-search-controls">
+                                <input type="search" id="pp-navigator-search-input" class="text_pole" placeholder="Search presets...">
+                                <button id="pp-navigator-search-clear" title="Clear Search" class="menu_button"><i class="fa-solid fa-times"></i></button>
                             </div>
                             <div class="nemo-header-buttons">
-                                <button id="navigator-view-toggle-btn" class="menu_button" title="Switch View"><i class="fa-solid fa-list"></i></button>
-                                <button id="navigator-new-folder-btn" class="menu_button" title="New Folder"><i class="fa-solid fa-folder-plus"></i></button>
+                                <button id="pp-navigator-view-toggle-btn" class="menu_button" title="Switch View"><i class="fa-solid fa-list"></i></button>
+                                <button id="pp-navigator-new-folder-btn" class="menu_button" title="New Folder"><i class="fa-solid fa-folder-plus"></i></button>
                             </div>
                         </div>
                     </div>
-                    <div id="navigator-grid-view"></div>
+                    <div id="pp-navigator-grid-view"></div>
                 </div>
             </div>
             <div class="modal-footer">
                 <span></span>
-                <button id="navigator-select-btn" class="menu_button" disabled><i class="fa-solid fa-check"></i> Select Preset</button>
+                <button id="pp-navigator-select-btn" class="menu_button" disabled><i class="fa-solid fa-check"></i> Select Preset</button>
             </div>
         </div>
     </div>`;
@@ -54,7 +56,7 @@ export class PresetNavigator {
         this.mainView = null;
         this.breadcrumbs = null;
         this.searchInput = null;
-        this.metadata = { folders: {}, presets: {} }; // Kept for folders, 'presets' part is now for folder assignment
+        this.metadata = { folders: {}, presets: {} };
         this.currentPath = [{ id: 'root', name: 'Home' }];
         this.allPresets = [];
         this.selectedPreset = { value: null, filename: null };
@@ -63,22 +65,22 @@ export class PresetNavigator {
     }
 
     init() {
+        // CHANGED: All query selectors now use the unique 'pp-' prefixed IDs.
         this.modal = document.getElementById('pp-preset-navigator-modal');
-        this.mainView = this.modal.querySelector('#navigator-grid-view');
-        this.breadcrumbs = this.modal.querySelector('#navigator-breadcrumbs');
-        this.searchInput = this.modal.querySelector('#navigator-search-input');
-        this.modal.querySelector('#navigator-select-btn').addEventListener('click', () => this.selectPreset());
-        this.modal.querySelector('#navigator-new-folder-btn').addEventListener('click', () => this.createNewFolder());
+        this.mainView = this.modal.querySelector('#pp-navigator-grid-view');
+        this.breadcrumbs = this.modal.querySelector('#pp-navigator-breadcrumbs');
+        this.searchInput = this.modal.querySelector('#pp-navigator-search-input');
+        this.modal.querySelector('#pp-navigator-select-btn').addEventListener('click', () => this.selectPreset());
+        this.modal.querySelector('#pp-navigator-new-folder-btn').addEventListener('click', () => this.createNewFolder());
         this.modal.querySelector('.close-button').addEventListener('click', () => this.close());
         this.searchInput.addEventListener('input', () => this.renderGridView());
-        this.modal.querySelector('#navigator-search-clear').addEventListener('click', () => { this.searchInput.value = ''; this.renderGridView(); });
-        this.modal.querySelector('#navigator-view-toggle-btn').addEventListener('click', () => this.toggleViewMode());
+        this.modal.querySelector('#pp-navigator-search-clear').addEventListener('click', () => { this.searchInput.value = ''; this.renderGridView(); });
+        this.modal.querySelector('#pp-navigator-view-toggle-btn').addEventListener('click', () => this.toggleViewMode());
         this.mainView.addEventListener('click', (e) => this.handleGridClick(e));
         this.mainView.addEventListener('dblclick', (e) => this.handleGridDoubleClick(e));
     }
 
     async open(targetSelectId) {
-        // Check window.isAppReady here as this function is called from a button handler
         if (!window.isAppReady) { window.toastr.info("SillyTavern is still loading, please wait."); return; }
 
         this.targetSelectId = targetSelectId;
@@ -175,7 +177,7 @@ export class PresetNavigator {
         return itemEl;
     }
 
-    createListItem(item) { return this.createGridItem(item); } // Currently same style
+    createListItem(item) { return this.createGridItem(item); }
 
     handleGridClick(e) {
         const item = e.target.closest('.grid-item');
@@ -210,27 +212,27 @@ export class PresetNavigator {
     }
 
     updateSelectButton() {
-        this.modal.querySelector('#navigator-select-btn').disabled = this.selectedPreset.value === null;
+        this.modal.querySelector('#pp-navigator-select-btn').disabled = this.selectedPreset.value === null;
     }
 
     fetchPresetList() {
-        // openai_setting_names should be available after APP_READY, but check anyway
         return window.isAppReady && openai_setting_names ? Object.keys(openai_setting_names).map(name => ({ name })) : [];
     }
 
     loadMetadata() {
         try {
-            const stored = localStorage.getItem(NEMO_METADATA_KEY);
+            // CHANGED: Reading from the unique localStorage key.
+            const stored = localStorage.getItem(PROSE_POLISHER_METADATA_KEY);
             if (stored) this.metadata = { folders: {}, presets: {}, ...JSON.parse(stored) };
         } catch (ex) { this.metadata = { folders: {}, presets: {} }; }
     }
 
     saveMetadata() {
-        localStorage.setItem(NEMO_METADATA_KEY, JSON.stringify(this.metadata));
+        // CHANGED: Saving to the unique localStorage key.
+        localStorage.setItem(PROSE_POLISHER_METADATA_KEY, JSON.stringify(this.metadata));
     }
 
     async createNewFolder() {
-        // Check window.isAppReady here as this function is called from a button handler
         if (!window.isAppReady) { window.toastr.info("SillyTavern is still loading, please wait."); return; }
 
         const name = await callGenericPopup('New Folder Name:', POPUP_TYPE.INPUT, 'New Folder');
@@ -245,6 +247,6 @@ export class PresetNavigator {
     toggleViewMode() {
         this.viewMode = (this.viewMode === 'grid') ? 'list' : 'grid';
         this.render();
-        this.modal.querySelector('#navigator-view-toggle-btn i').className = `fa-solid ${this.viewMode === 'grid' ? 'fa-list' : 'fa-grip'}`;
+        this.modal.querySelector('#pp-navigator-view-toggle-btn i').className = `fa-solid ${this.viewMode === 'grid' ? 'fa-list' : 'fa-grip'}`;
     }
 }
