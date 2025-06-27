@@ -1,4 +1,3 @@
-// C:\SillyTavern\public\scripts\extensions\third-party\ProsePolisher\analyzer.js
 import { extension_settings, getContext } from '../../../extensions.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import { applyGremlinEnvironment, executeGen } from './projectgremlin.js'; // Ensure these are correctly imported
@@ -11,15 +10,10 @@ import { lemmaMap } from './lemmas.js';
 const LOG_PREFIX = `[ProsePolisher:Analyzer]`;
 
 // Constants
-const SLOP_THRESHOLD = 3;
 const BATCH_SIZE = 15; // Number of final candidates to send to AI for regex generation
 const TWINS_PRESCREEN_BATCH_SIZE = 50; // Max number of candidates to send to Twins for pre-screening
-const MANUAL_ANALYSIS_CHUNK_SIZE = 20;
 const CANDIDATE_LIMIT_FOR_ANALYSIS = 2000;
-const PRUNE_AFTER_MESSAGES = 20;
-const NGRAM_MIN = 3;
-const NGRAM_MAX = 10;
-const PATTERN_MIN_COMMON_WORDS = 3;
+const NGRAM_MIN = 3; // The minimum n-gram size is fundamental to the logic.
 const MIN_ALTERNATIVES_PER_RULE = 15;
 
 
@@ -84,7 +78,7 @@ export class Analyzer {
 
         this.ngramFrequencies = new Map();
         this.slopCandidates = new Set();
-        this.analyzedLeaderboardData = { merged: [], remaining: [] };
+        this.analyzedLeaderboardData = { merged: {}, remaining: {} };
         this.messageCounterForTrigger = 0;
         this.totalAiMessagesProcessed = 0;
         this.isProcessingAiRules = false;
@@ -142,6 +136,9 @@ export class Analyzer {
     analyzeAndTrackFrequency(text) {
         const cleanText = stripMarkup(text);
         if (!cleanText.trim()) return;
+
+        const NGRAM_MAX = this.settings.ngramMax || 10;
+        const SLOP_THRESHOLD = this.settings.slopThreshold || 3.0;
 
         const chunks = [];
         let lastIndex = 0;
@@ -226,6 +223,8 @@ export class Analyzer {
     }
     
     pruneOldNgrams() {
+        const PRUNE_AFTER_MESSAGES = this.settings.pruningCycle || 20;
+        const SLOP_THRESHOLD = this.settings.slopThreshold || 3.0;
         let prunedCount = 0;
         for (const [ngram, data] of this.ngramFrequencies.entries()) {
             if ((this.totalAiMessagesProcessed - data.lastSeenMessageIndex > PRUNE_AFTER_MESSAGES)) {
@@ -256,6 +255,7 @@ export class Analyzer {
     }
 
     findAndMergePatterns(frequenciesObjectWithOriginals) { 
+        const PATTERN_MIN_COMMON_WORDS = this.settings.patternMinCommon || 3;
         const phraseScoreMap = {}; 
         for (const data of Object.values(frequenciesObjectWithOriginals)) {
             phraseScoreMap[data.original] = (phraseScoreMap[data.original] || 0) + data.score; 
@@ -367,8 +367,8 @@ export class Analyzer {
         const allRemainingEntries = Object.entries(remaining).sort((a, b) => b[1] - a[1]);
         
         this.analyzedLeaderboardData = {
-            merged: merged,
-            remaining: remaining,
+            merged: Object.fromEntries(mergedEntries),
+            remaining: Object.fromEntries(allRemainingEntries),
         };
     }
 
@@ -906,21 +906,39 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
 
     showFrequencyLeaderboard() {
         if (typeof window.isAppReady === 'undefined' || !window.isAppReady) { this.toastr.info("SillyTavern is still loading, please wait."); return; }
+        
         const { merged: mergedEntries, remaining: remainingEntries } = this.analyzedLeaderboardData;
-        console.log(`${LOG_PREFIX} showFrequencyLeaderboard: mergedEntries`, mergedEntries);
-        console.log(`${LOG_PREFIX} showFrequencyLeaderboard: remainingEntries`, remainingEntries);
         let contentHtml;
-        if (mergedEntries.length === 0 && remainingEntries.length === 0) {
-            contentHtml = '<p>No repetitive phrases have been detected that meet display criteria.</p>';
-        } else {
-            const mergedRows = mergedEntries.map(([phrase, score]) => `<tr class="is-pattern"><td>${this.escapeHtml(phrase)}</td><td>${score.toFixed(1)}</td></tr>`).join('');
-            const remainingRows = remainingEntries.map(([phrase, score]) => `<tr><td>${this.escapeHtml(phrase)}</td><td>${score.toFixed(1)}</td></tr>`).join('');
-            contentHtml = `<p>The following have been detected as repetitive. Phrases in <strong>bold orange</strong> are detected patterns. Score is based on frequency, uniqueness, length, and context. Higher is worse.</p>
+        const isProcessedDataAvailable = (mergedEntries && Object.keys(mergedEntries).length > 0) || (remainingEntries && Object.keys(remainingEntries).length > 0);
+
+        if (isProcessedDataAvailable) {
+            // Path 1: Show the fully processed, patterned data (the best view)
+            const mergedRows = Object.entries(mergedEntries).map(([phrase, score]) => `<tr class="is-pattern"><td>${this.escapeHtml(phrase)}</td><td>${score.toFixed(1)}</td></tr>`).join('');
+            const remainingRows = Object.entries(remainingEntries).map(([phrase, score]) => `<tr><td>${this.escapeHtml(phrase)}</td><td>${score.toFixed(1)}</td></tr>`).join('');
+            
+            contentHtml = `<p>Showing <strong>processed and patterned</strong> slop data. Phrases in <strong>bold orange</strong> are detected patterns. This list updates automatically every 10 messages.</p>
                            <table class="prose-polisher-frequency-table">
                                <thead><tr><th>Repetitive Phrase or Pattern</th><th>Slop Score</th></tr></thead>
                                <tbody>${mergedRows}${remainingRows}</tbody>
                            </table>`;
+        } else if (this.ngramFrequencies.size > 0) {
+            // Path 2 (Fallback): Show raw, unprocessed data for immediate feedback
+            const rawEntries = Array.from(this.ngramFrequencies.values())
+                .filter(data => data.score > 0) // Only show items with a score
+                .sort((a, b) => b.score - a.score);
+
+            const rawRows = rawEntries.map(data => `<tr><td>${this.escapeHtml(data.original)}</td><td>${data.score.toFixed(1)}</td></tr>`).join('');
+            
+            contentHtml = `<p>Showing <strong>raw, unprocessed</strong> n-grams detected so far. This data is collected on every AI message and will be processed into patterns periodically.</p>
+                           <table class="prose-polisher-frequency-table">
+                               <thead><tr><th>Detected Phrase</th><th>Slop Score</th></tr></thead>
+                               <tbody>${rawRows}</tbody>
+                           </table>`;
+        } else {
+            // Path 3 (Final Fallback): Nothing has been detected at all
+            contentHtml = '<p>No repetitive phrases have been detected yet. Send some AI messages to begin analysis.</p>';
         }
+
         this.callGenericPopup(contentHtml, this.POPUP_TYPE.TEXT, "Live Frequency Data (Slop Score)", { wide: true, large: true });
     }
 
@@ -1066,87 +1084,12 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
         this.ngramFrequencies.clear();
         this.slopCandidates.clear();
         this.messageCounterForTrigger = 0;
-        this.analyzedLeaderboardData = { merged: [], remaining: [] };
+        this.analyzedLeaderboardData = { merged: {}, remaining: {} };
         this.toastr.success("Prose Polisher frequency data cleared!");
     }
 
     incrementProcessedMessages() {
          this.totalAiMessagesProcessed++;
-    }
-
-    checkDynamicRuleTrigger(dynamicRulesRef, regexNavigatorRef) { 
-        if (this.isProcessingAiRules) return; 
-
-        if (this.settings.isDynamicEnabled && this.slopCandidates.size > 0) {
-            this.messageCounterForTrigger++;
-            if (this.messageCounterForTrigger >= this.settings.dynamicTriggerCount) {
-                this.messageCounterForTrigger = 0;
-                
-                const getOriginalFromKey = (lemmatizedKey) => {
-                    if (!lemmatizedKey) return lemmatizedKey;
-                    const data = this.ngramFrequencies.get(lemmatizedKey);
-                    return data ? data.original : lemmatizedKey;
-                };
-                const slopCandidatesOriginal = Array.from(this.slopCandidates).map(getOriginalFromKey);
-                const candidatesForAutoTriggerOriginal = slopCandidatesOriginal.slice(0, TWINS_PRESCREEN_BATCH_SIZE);
-
-
-                if (candidatesForAutoTriggerOriginal.length > 0) {
-                    this.toastr.info(`Prose Polisher: Auto-triggering Twins pre-screening for ${candidatesForAutoTriggerOriginal.length} candidates...`, "Project Gremlin");
-                    this.callTwinsForSlopPreScreening(candidatesForAutoTriggerOriginal, this.compiledRegexes).then(async validCandidatesForGeneration => {
-                        if (validCandidatesForGeneration.length > 0) {
-                            const batchToProcess = validCandidatesForGeneration.slice(0, BATCH_SIZE); 
-                            this.isProcessingAiRules = true; 
-                            let newRulesCount = 0;
-                            try {
-                                if (this.settings.regexGenerationMethod === 'twins') {
-                                    this.toastr.info(`Prose Polisher: Auto-triggering Iterative Twins rule generation for ${batchToProcess.length} pre-screened candidates...`, "Project Gremlin");
-                                    newRulesCount = await this.generateRulesIterativelyWithTwins(batchToProcess, dynamicRulesRef, this.settings.regexTwinsCycles);
-                                } else {
-                                    const gremlinRoleForRegexGen = this.settings.regexGeneratorRole || 'writer';
-                                    const roleForGenUpper = gremlinRoleForRegexGen.charAt(0).toUpperCase() + gremlinRoleForRegexGen.slice(1);
-                                    this.toastr.info(`Prose Polisher: Auto-triggering Single Gremlin (${roleForGenUpper}) rule generation for ${batchToProcess.length} pre-screened candidates...`, "Project Gremlin");
-                                    newRulesCount = await this.generateAndSaveDynamicRulesWithSingleGremlin(batchToProcess, dynamicRulesRef, gremlinRoleForRegexGen);
-                                }
-                            } catch (error) {
-                                console.error(`${LOG_PREFIX} Error during auto-triggered rule generation:`, error);
-                                this.toastr.error("Error during auto-triggered rule generation. See console.");
-                            } finally {
-                                this.isProcessingAiRules = false;
-                            }
-
-
-                            if (newRulesCount > 0) {
-                                batchToProcess.forEach(processedCandidate => {
-                                    let keyToDelete = null;
-                                    for (const [lemmatizedKey, data] of this.ngramFrequencies.entries()) {
-                                        if (data.original === processedCandidate.candidate) {
-                                            keyToDelete = lemmatizedKey;
-                                            break;
-                                        }
-                                    }
-                                    if (keyToDelete) {
-                                        this.slopCandidates.delete(keyToDelete);
-                                        if (this.ngramFrequencies.has(keyToDelete)) {
-                                            this.ngramFrequencies.get(keyToDelete).score = 0; 
-                                        }
-                                    }
-                                });
-                                if (regexNavigatorRef) regexNavigatorRef.renderRuleList();
-                            }
-                        } else {
-                            this.toastr.info("Prose Polisher: Twins' pre-screening found no valid candidates for auto-rule generation.", "Project Gremlin");
-                        }
-                    }).catch(error => {
-                        console.error(`${LOG_PREFIX} Error in auto-trigger pre-screening chain:`, error);
-                        this.toastr.error("Error during auto-trigger pre-screening. See console.");
-                        this.isProcessingAiRules = false; 
-                    });
-                }
-            }
-        } else {
-            this.messageCounterForTrigger = 0;
-        }
     }
 
     async manualAnalyzeChatHistory() {
@@ -1170,29 +1113,41 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
             return;
         }
         const chatMessages = context.chat;
-        console.log(`${LOG_PREFIX} Chat messages being sent to worker:`, chatMessages);
-        const compiledRegexes = this.compiledRegexes; // Get compiled regexes from Analyzer instance
-
         const worker = new Worker('./scripts/extensions/third-party/ProsePolisher/analyzer.worker.js', { type: 'module' });
+
+        // Serialize RegExp objects into strings for the worker, as RegExp objects cannot be cloned.
+        const compiledRegexSources = this.compiledRegexes.map(r => r.source);
 
         worker.postMessage({
             type: 'startAnalysis',
             chatMessages: chatMessages,
             settings: this.settings,
-            compiledRegexes: compiledRegexes,
+            compiledRegexSources: compiledRegexSources, // Pass serializable sources instead of RegExp objects
         });
 
         worker.onmessage = (e) => {
-            const { type, processed, total, aiAnalyzed, analyzedLeaderboardData, slopCandidates } = e.data;
+            const { type, processed, total, aiAnalyzed, analyzedLeaderboardData, slopCandidates, ngramFrequencies } = e.data;
             if (type === 'progress') {
                 this.toastr.info(`Prose Polisher: Analyzing chat history... ${processed}/${total} messages processed.`, "Chat Analysis", { timeOut: 1000 });
                 console.log(`${LOG_PREFIX} [Manual Analysis] Processed ${processed}/${total} messages...`);
             } else if (type === 'complete') {
                 console.log(`${LOG_PREFIX} Worker complete message received. Data from worker:`, e.data);
+
+                // Fully synchronize the main analyzer's state with the worker's results.
                 this.analyzedLeaderboardData = analyzedLeaderboardData;
+                this.ngramFrequencies = ngramFrequencies; // Adopt the frequency map from the worker.
                 this.slopCandidates = new Set(slopCandidates); // Reconstruct Set from array
                 this.isAnalyzingHistory = false;
-                this.toastr.success(`Prose Polisher: Chat history analysis complete! Analyzed ${aiAnalyzed} AI messages. View Frequency Data to see results.`, "Chat Analysis Complete", { timeOut: 7000 });
+
+                // Prime the trigger counter if the analysis found slop, so self-learning can fire on the next message.
+                if (slopCandidates && slopCandidates.length > 0) {
+                    this.messageCounterForTrigger = this.settings.dynamicTriggerCount;
+                    console.log(`${LOG_PREFIX} Manual analysis found slop. Priming trigger counter to ${this.messageCounterForTrigger}.`);
+                    this.toastr.info("Prose Polisher: Slop found! Self-learning is armed and will trigger on your next message.", "Chat Analysis Complete");
+                } else {
+                    this.toastr.success(`Prose Polisher: Chat history analysis complete! Analyzed ${aiAnalyzed} AI messages. No new slop candidates found.`, "Chat Analysis Complete", { timeOut: 7000 });
+                }
+                
                 console.log(`${LOG_PREFIX} Manual chat history analysis complete. Analyzed ${aiAnalyzed} AI messages.`, { analyzedLeaderboardData, slopCandidates });
                 worker.terminate(); // Terminate worker after completion
                 this.showFrequencyLeaderboard(); // Display results after analysis

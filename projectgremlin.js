@@ -1,4 +1,3 @@
-// C:\SillyTavern\public\scripts\extensions\third-party\ProsePolisher\projectgremlin.js
 import { extension_settings, getContext } from '../../../extensions.js';
 
 // **THE FIX IS HERE**
@@ -154,20 +153,17 @@ export async function applyGremlinEnvironment(role) {
     }
     const settings = extension_settings.ProsePolisher;
     const roleUpper = role.charAt(0).toUpperCase() + role.slice(1);
+
     const presetName = settings[`gremlin${roleUpper}Preset`];
     const apiNameSetting = settings[`gremlin${roleUpper}Api`];
     const modelName = settings[`gremlin${roleUpper}Model`];
-    // Use the specific custom URL for the role if the API is 'custom'
-    const source = (apiNameSetting === 'custom') 
-        ? settings[`gremlin${roleUpper}CustomUrl`] 
-        : settings[`gremlin${roleUpper}Source`];
+    const customUrl = settings[`gremlin${roleUpper}CustomUrl`];
+    const source = settings[`gremlin${roleUpper}Source`];
 
     const commands = [];
 
     if (presetName && presetName !== 'Default') {
         commands.push(`/preset "${presetName}"`);
-    } else {
-        console.log(`[ProjectGremlin] Using 'Default' or no Preset for ${roleUpper}.`);
     }
 
     if (apiNameSetting) {
@@ -175,25 +171,24 @@ export async function applyGremlinEnvironment(role) {
         const apiConfig = CONNECT_API_MAP[apiNameKey];
 
         if (apiConfig) {
-            commands.push(`/api ${apiConfig.selected}`);
+            let apiCommand = `/api ${apiConfig.selected}`;
+            if (apiConfig.selected === 'custom' && customUrl) {
+                apiCommand += ` url=${customUrl}`;
+            }
+            commands.push(apiCommand);
+
             if (modelName) {
-                let sourceCommand = '';
-                // The source_field is only needed for 'custom' API type now
-                if (apiConfig.selected === 'custom' && source) {
-                    sourceCommand = ` source_field=${source}`;
+                let modelCommand = `/model "${modelName}"`;
+                if (source) {
+                    modelCommand += ` source_field=${source}`;
                 }
-                
-                commands.push(`/model "${modelName}"${sourceCommand}`);
-            } else {
-                console.log(`[ProjectGremlin] No specific Model configured for ${roleUpper} with API ${apiNameSetting}.`);
+                commands.push(modelCommand);
             }
         } else {
-            console.error(`[ProjectGremlin] Unknown API mapping for "${apiNameSetting}" (key: "${apiNameKey}") for role ${roleUpper}.`);
+            console.error(`[ProjectGremlin] Unknown API mapping for "${apiNameSetting}" for role ${roleUpper}.`);
             window.toastr.error(`[ProjectGremlin] Unknown API mapping for ${roleUpper}: "${apiNameSetting}"`, "Project Gremlin");
             return false;
         }
-    } else {
-        console.log(`[ProjectGremlin] No specific API configured for ${roleUpper}.`);
     }
 
     if (commands.length === 0) {
@@ -213,6 +208,66 @@ export async function applyGremlinEnvironment(role) {
     } catch (err) {
         console.error(`[ProjectGremlin] Failed to execute setup script for ${roleUpper}: "${script.substring(0, 100)}..."`, err);
         window.toastr.error(`Failed to execute script for ${roleUpper}. Details: ${err.message}`, "Project Gremlin Setup Failed");
+        return false;
+    }
+    return true;
+}
+
+export async function applyGremlinWriterChaosOption(chaosOption) {
+    if (typeof window.isAppReady === 'undefined' || !window.isAppReady) {
+        console.warn(`[ProjectGremlin] applyGremlinWriterChaosOption called before app ready.`);
+        return false;
+    }
+
+    const { preset, api: apiNameSetting, model: modelName, customUrl, source } = chaosOption;
+    const commands = [];
+
+    if (preset && preset !== 'Default') {
+        commands.push(`/preset "${preset}"`);
+    }
+
+    if (apiNameSetting) {
+        const apiNameKey = apiNameSetting.toLowerCase();
+        const apiConfig = CONNECT_API_MAP[apiNameKey];
+
+        if (apiConfig) {
+            let apiCommand = `/api ${apiConfig.selected}`;
+            if (apiConfig.selected === 'custom' && customUrl) {
+                apiCommand += ` url=${customUrl}`;
+            }
+            commands.push(apiCommand);
+
+            if (modelName) {
+                let modelCommand = `/model "${modelName}"`;
+                if (source) {
+                    modelCommand += ` source_field=${source}`;
+                }
+                commands.push(modelCommand);
+            }
+        } else {
+            console.error(`[ProjectGremlin] Unknown API mapping for chaos option "${apiNameSetting}".`);
+            window.toastr.error(`[ProjectGremlin] Unknown API in chaos option: "${apiNameSetting}"`, "Project Gremlin");
+            return false;
+        }
+    }
+
+    if (commands.length === 0) {
+        console.log(`[ProjectGremlin] No settings to apply for chaos option, using current environment.`);
+        return true;
+    }
+    const script = commands.join(' | ');
+    console.log(`[ProjectGremlin] Executing chaos environment setup: ${script}`);
+    try {
+        const result = await getContext().executeSlashCommandsWithOptions(script, {
+            showOutput: false,
+            handleExecutionErrors: true,
+        });
+        if (result && result.isError) {
+            throw new Error(`STScript execution failed for chaos option: ${result.errorMessage}`);
+        }
+    } catch (err) {
+        console.error(`[ProjectGremlin] Failed to execute chaos script: "${script.substring(0, 100)}..."`, err);
+        window.toastr.error(`Failed to execute chaos script. Details: ${err.message}`, "Project Gremlin Setup Failed");
         return false;
     }
     return true;

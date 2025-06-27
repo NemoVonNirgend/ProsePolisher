@@ -1,15 +1,9 @@
-// X:/Users/jjhfq/OneDrive/Documents/silly/sillytavern 3 (THE REVENGE)/SillyTavern/public/scripts/extensions/third-party/ProsePolisher/analyzer.worker.js
-
 import { commonWords } from './common_words.js';
 import { defaultNames } from './default_names.js';
 import { lemmaMap } from './lemmas.js';
 
-// Constants (must be duplicated here as they are used in the worker)
-const SLOP_THRESHOLD = 3;
-const NGRAM_MIN = 3;
-const NGRAM_MAX = 10;
-const PATTERN_MIN_COMMON_WORDS = 3;
-const PRUNE_AFTER_MESSAGES = 20;
+// Constants
+const NGRAM_MIN = 3; // The minimum n-gram size is fundamental to the logic.
 const CANDIDATE_LIMIT_FOR_ANALYSIS = 2000;
 
 // Utility Functions (copied from analyzer.js)
@@ -58,9 +52,17 @@ function cullSubstrings(frequenciesObject) {
 }
 
 class AnalyzerWorker {
-    constructor(settings, compiledRegexes) {
+    constructor(settings, compiledRegexSources) {
         this.settings = settings;
-        this.compiledRegexes = compiledRegexes; // Store compiled regexes passed from main thread
+        // Reconstruct RegExp objects from their string sources
+        this.compiledRegexes = (compiledRegexSources || []).map(source => {
+            try {
+                return new RegExp(source, 'i');
+            } catch (e) {
+                console.warn(`[ProsePolisher:AnalyzerWorker] Invalid regex source received: ${source}`, e);
+                return null;
+            }
+        }).filter(Boolean);
 
         this.ngramFrequencies = new Map();
         this.slopCandidates = new Set();
@@ -101,7 +103,6 @@ class AnalyzerWorker {
         return maxWeight;
     }
 
-    // This function will now use the compiledRegexes passed to the worker
     isPhraseHandledByRegexWorker(phrase) {
         const lowerCasePhrase = phrase.toLowerCase();
         for (const regex of this.compiledRegexes) {
@@ -115,6 +116,9 @@ class AnalyzerWorker {
     analyzeAndTrackFrequency(text) {
         const cleanText = stripMarkup(text);
         if (!cleanText.trim()) return;
+
+        const NGRAM_MAX = this.settings.ngramMax || 10;
+        const SLOP_THRESHOLD = this.settings.slopThreshold || 3.0;
 
         const chunks = [];
         let lastIndex = 0;
@@ -198,6 +202,8 @@ class AnalyzerWorker {
     }
     
     pruneOldNgrams() {
+        const PRUNE_AFTER_MESSAGES = this.settings.pruningCycle || 20;
+        const SLOP_THRESHOLD = this.settings.slopThreshold || 3.0;
         let prunedCount = 0;
         for (const [ngram, data] of this.ngramFrequencies.entries()) {
             if ((this.totalAiMessagesProcessed - data.lastSeenMessageIndex > PRUNE_AFTER_MESSAGES)) {
@@ -228,6 +234,7 @@ class AnalyzerWorker {
     }
 
     findAndMergePatterns(frequenciesObjectWithOriginals) { 
+        const PATTERN_MIN_COMMON_WORDS = this.settings.patternMinCommon || 3;
         const phraseScoreMap = {}; 
         for (const data of Object.values(frequenciesObjectWithOriginals)) {
             phraseScoreMap[data.original] = (phraseScoreMap[data.original] || 0) + data.score; 
@@ -344,9 +351,8 @@ class AnalyzerWorker {
     }
 
     // Main message handler for the worker
-    async processChatHistory(chatMessages, settings, compiledRegexes) {
+    async processChatHistory(chatMessages, settings) {
         this.settings = settings;
-        this.compiledRegexes = compiledRegexes;
         this.updateEffectiveWhitelist(); // Update whitelist based on new settings
 
         this.ngramFrequencies.clear();
@@ -397,6 +403,7 @@ class AnalyzerWorker {
             type: 'complete',
             analyzedLeaderboardData: this.analyzedLeaderboardData,
             slopCandidates: slopCandidatesOriginal,
+            ngramFrequencies: this.ngramFrequencies, // Send the full frequency map back
             aiMessagesAnalyzed: aiMessagesAnalyzed
         });
     }
@@ -405,12 +412,14 @@ class AnalyzerWorker {
 let analyzerWorkerInstance = null;
 
 onmessage = async function(e) {
-    const { type, chatMessages, settings, compiledRegexes } = e.data;
+    const { type, chatMessages, settings, compiledRegexSources } = e.data;
 
     if (type === 'startAnalysis') {
         if (!analyzerWorkerInstance) {
-            analyzerWorkerInstance = new AnalyzerWorker(settings, compiledRegexes);
+            // Pass the serializable regex sources to the constructor
+            analyzerWorkerInstance = new AnalyzerWorker(settings, compiledRegexSources);
         }
-        await analyzerWorkerInstance.processChatHistory(chatMessages, settings, compiledRegexes);
+        // processChatHistory no longer needs the regexes passed directly
+        await analyzerWorkerInstance.processChatHistory(chatMessages, settings);
     }
 };

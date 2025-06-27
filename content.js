@@ -1,4 +1,3 @@
-// C:\SillyTavern\public\scripts\extensions\third-party\ProsePolisher\content.js
 import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
@@ -6,9 +5,9 @@ import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import { openai_setting_names, chat_completion_sources } from '../../../../scripts/openai.js';
 
 // Local module imports
-import { PresetNavigator, injectNavigatorModal } from './navigator.js';
+import { PresetNavigator, injectNavigatorModal, generateUUID } from './navigator.js';
 import {
-    runGremlinPlanningPipeline, applyGremlinEnvironment, executeGen,
+    runGremlinPlanningPipeline, applyGremlinEnvironment, executeGen, applyGremlinWriterChaosOption,
     DEFAULT_PAPA_INSTRUCTIONS as PG_DEFAULT_PAPA_INSTRUCTIONS,
     DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE as PG_DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE,
     DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE as PG_DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE,
@@ -22,7 +21,6 @@ export const EXTENSION_NAME = "ProsePolisher";
 const LOG_PREFIX = `[${EXTENSION_NAME}]`;
 const EXTENSION_FOLDER_PATH = `scripts/extensions/third-party/${EXTENSION_NAME}`;
 const PROSE_POLISHER_ID_PREFIX = '_prosePolisherRule_';
-const PRUNE_CHECK_INTERVAL = 10;
 const GREMLIN_ROLES = ['papa', 'twins', 'mama', 'writer', 'auditor'];
 
 // --- State Variables ---
@@ -30,13 +28,36 @@ let staticRules = [];
 let dynamicRules = [];
 let regexNavigator;
 let prosePolisherAnalyzer = null;
+let processedMessageIds = new Set();
 
 // Gremlin-specific state variables
 let isPipelineRunning = false;
 let isAppReady = false;
 let readyQueue = [];
 
-// --- DEFAULT GREMLIN PROMPT CONSTANTS for Writer & Auditor (managed within content.js) ---
+// --- CONSTANTS ---
+
+// This map connects the API key to the DOM ID of the corresponding model dropdown in the main UI.
+const API_TO_SELECTOR_MAP = {
+    [chat_completion_sources.OPENAI]: '#model_openai_select',
+    [chat_completion_sources.CLAUDE]: '#model_claude_select',
+    [chat_completion_sources.MAKERSUITE]: '#model_google_select',
+    [chat_completion_sources.VERTEXAI]: '#model_vertexai_select',
+    [chat_completion_sources.OPENROUTER]: '#model_openrouter_select', // This is the primary (Chat Completion) selector
+    [chat_completion_sources.MISTRALAI]: '#model_mistralai_select',
+    [chat_completion_sources.GROQ]: '#model_groq_select',
+    [chat_completion_sources.COHERE]: '#model_cohere_select',
+    [chat_completion_sources.AI21]: '#model_ai21_select',
+    [chat_completion_sources.PERPLEXITY]: '#model_perplexity_select',
+    [chat_completion_sources.DEEPSEEK]: '#model_deepseek_select',
+    [chat_completion_sources.AIMLAPI]: '#model_aimlapi_select',
+    [chat_completion_sources.XAI]: '#model_xai_select',
+    [chat_completion_sources.ZEROONEAI]: '#model_01ai_select',
+    [chat_completion_sources.POLLINATIONS]: '#model_pollinations_select',
+    [chat_completion_sources.NANOGPT]: '#model_nanogpt_select',
+};
+
+
 const DEFAULT_WRITER_INSTRUCTIONS_TEMPLATE = `[OOC: You are a master writer. Follow these instructions from your project lead precisely for your next response. Do not mention the blueprint or instructions in your reply. Your writing should be creative and engaging, bringing this plan to life. Do not write from the user's perspective. Write only the character's response.\n\n# INSTRUCTIONS\n{{BLUEPRINT}}]`;
 const DEFAULT_AUDITOR_INSTRUCTIONS_TEMPLATE = `[OOC: You are a master line editor. Your task is to revise and polish the following text. Correct any grammatical errors, awkward phrasing, or typos. Eliminate repetitive words and sentence structures. Enhance the prose to be more evocative and impactful, while respecting the established character voice and tone. If the text is fundamentally flawed or completely fails to follow the narrative, rewrite it from scratch to be high quality. **CRUCIAL:** Your output must ONLY be the final, edited text. Do NOT include any commentary, explanations, or introductory phrases like "Here is the revised version:".
 
@@ -74,13 +95,30 @@ For each identified phrase, create a JavaScript regular expression (regex) that 
 Do NOT include any other text or commentary in your response, only the JSON array.`;
 
 const defaultSettings = {
+    // Prose Polisher - Regex & Learning
+    isStaticEnabled: true,
+    isDynamicEnabled: true,
+    integrateWithGlobalRegex: true,
+    dynamicTriggerCount: 30,
     regexGenerationInstructions: '',
+    regexGenerationMethod: 'single',
+    regexGeneratorRole: 'writer',
+    regexTwinsCycles: 2,
+    skipTriageCheck: false,
 
+    // Prose Polisher - Analysis Engine
+    slopThreshold: 3.0,
+    leaderboardUpdateCycle: 10,
+    pruningCycle: 20,
+    ngramMax: 10,
+    patternMinCommon: 3,
+
+    // Project Gremlin - Pipeline
     projectGremlinEnabled: false,
     gremlinPapaEnabled: true,
     gremlinTwinsEnabled: true,
     gremlinMamaEnabled: true,
-    gremlinTwinsIterations: 3, // For blueprint refinement, distinct from regexTwinsCycles
+    gremlinTwinsIterations: 3,
     gremlinAuditorEnabled: false,
 
     gremlinPapaPreset: 'Default',
@@ -111,6 +149,8 @@ const defaultSettings = {
     gremlinWriterSource: '',
     gremlinWriterCustomUrl: '',
     gremlinWriterInstructionsTemplate: '',
+    gremlinWriterChaosModeEnabled: false,
+    gremlinWriterChaosOptions: [],
 
     gremlinAuditorPreset: 'Default',
     gremlinAuditorApi: 'openai',
@@ -393,28 +433,24 @@ async function showApiEditorPopup(gremlinRole) {
 
     const populateModels = (api) => {
         modelSelect.innerHTML = '';
-        let sourceSelectorId = '';
+        let sourceSelect = null;
 
-        // Map the API value to the ID of the corresponding dropdown in the main UI
-        const apiToSelectorMap = {
-            [chat_completion_sources.OPENAI]: '#model_openai_select',
-            [chat_completion_sources.CLAUDE]: '#model_claude_select',
-            [chat_completion_sources.MAKERSUITE]: '#model_google_select',
-            [chat_completion_sources.VERTEXAI]: '#model_vertexai_select',
-            [chat_completion_sources.OPENROUTER]: '#model_openrouter_select',
-            [chat_completion_sources.MISTRALAI]: '#model_mistralai_select',
-            [chat_completion_sources.GROQ]: '#model_groq_select',
-            [chat_completion_sources.COHERE]: '#model_cohere_select',
-            [chat_completion_sources.AI21]: '#model_ai21_select',
-            [chat_completion_sources.PERPLEXITY]: '#model_perplexity_select',
-            [chat_completion_sources.DEEPSEEK]: '#model_deepseek_select',
-            [chat_completion_sources.AIMLAPI]: '#model_aimlapi_select',
-            [chat_completion_sources.XAI]: '#model_xai_select',
-            [chat_completion_sources.ZEROONEAI]: '#model_01ai_select',
-            [chat_completion_sources.POLLINATIONS]: '#model_pollinations_select',
-            [chat_completion_sources.NANOGPT]: '#model_nanogpt_select',
-        };
-        sourceSelectorId = apiToSelectorMap[api];
+        // CORRECTED: Smartly find the OpenRouter model list, wherever it may be.
+        if (api === chat_completion_sources.OPENROUTER) {
+            // The Chat Completion UI is primary.
+            sourceSelect = document.querySelector('#model_openrouter_select');
+            // If it's empty or missing, check the Text Completion UI as a fallback.
+            if (!sourceSelect || sourceSelect.options.length <= 1) {
+                console.log(`${LOG_PREFIX} OpenRouter chat completion list not found or empty, checking text completion list...`);
+                sourceSelect = document.querySelector('#openrouter_model');
+            }
+        } else {
+            // Standard logic for all other APIs.
+            const sourceSelectorId = API_TO_SELECTOR_MAP[api];
+            if (sourceSelectorId) {
+                sourceSelect = document.querySelector(sourceSelectorId);
+            }
+        }
 
         // Toggle UI elements based on API
         const isCustom = api === chat_completion_sources.CUSTOM;
@@ -423,17 +459,18 @@ async function showApiEditorPopup(gremlinRole) {
         customUrlGroup.style.display = isCustom ? 'block' : 'none';
         sourceGroup.style.display = ['openai', 'openrouter', 'custom'].includes(api) ? 'block' : 'none';
 
-        if (sourceSelectorId) {
-            const sourceSelect = document.querySelector(sourceSelectorId);
-            if (sourceSelect) {
-                // Clone all options (including those in optgroups)
-                Array.from(sourceSelect.childNodes).forEach(node => {
-                    modelSelect.appendChild(node.cloneNode(true));
-                });
-            } else {
-                console.warn(`${LOG_PREFIX} Could not find source model selector: ${sourceSelectorId}`);
-                modelSelect.innerHTML = '<option value="">No models found in main UI</option>';
+        if (sourceSelect) {
+            // Clone all options (including those in optgroups)
+            Array.from(sourceSelect.childNodes).forEach(node => {
+                modelSelect.appendChild(node.cloneNode(true));
+            });
+            if (modelSelect.options.length <= 1) {
+                console.warn(`${LOG_PREFIX} Source selector for ${api} was found, but it's empty.`);
+                modelSelect.innerHTML = '<option value="">-- No models loaded in main UI --</option>';
             }
+        } else {
+            console.warn(`${LOG_PREFIX} Could not find any source model selector for API: ${api}`);
+            modelSelect.innerHTML = '<option value="">-- No models found in main UI --</option>';
         }
     };
 
@@ -593,6 +630,247 @@ async function showInstructionsEditorPopup(gremlinRole) {
     }
 }
 
+// *** START: NEW CHAOS MODE FUNCTIONS ***
+
+async function showWriterChaosConfigPopup() {
+    if (!isAppReady) { window.toastr.info("SillyTavern is still loading, please wait."); return; }
+
+    const container = document.createElement('div');
+    container.id = 'pp-chaos-config-popup-content';
+    container.innerHTML = `
+        <p>Configure multiple API/Model/Preset options for the Writer Gremlin. When Chaos Mode is on, one of these will be chosen randomly for each generation based on its weight.</p>
+        <div class="list-container" style="max-height: 400px; overflow-y: auto;">
+            <ul id="pp-chaos-options-list"></ul>
+        </div>
+        <button id="pp-add-chaos-option-btn" class="menu_button"><i class="fa-solid fa-plus"></i> Add New Chaos Option</button>
+    `;
+
+    const renderChaosOptionsList = () => {
+        const settings = extension_settings[EXTENSION_NAME];
+        const listElement = container.querySelector('#pp-chaos-options-list');
+        listElement.innerHTML = '';
+
+        if (!settings.gremlinWriterChaosOptions || settings.gremlinWriterChaosOptions.length === 0) {
+            listElement.innerHTML = '<li style="text-align:center; color:var(--text_color_dim); padding: 10px;">No chaos options configured.</li>';
+            return;
+        }
+
+        settings.gremlinWriterChaosOptions.forEach(option => {
+            const item = document.createElement('li');
+            item.className = 'list-item';
+            item.dataset.optionId = option.id;
+
+            const display = `<strong>${option.api} / ${option.model || 'Not Set'}</strong> (Preset: ${option.preset || 'Default'})`;
+
+            item.innerHTML = `
+                <div style="flex-grow:1; min-width:0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${display}</div>
+                <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
+                    <label for="chaos-weight-${option.id}" style="font-size:0.9em; margin:0;">Weight:</label>
+                    <input type="number" id="chaos-weight-${option.id}" class="text_pole" value="${option.weight || 1}" min="1" max="100" style="width:60px;">
+                    <button class="menu_button pp-chaos-edit-btn" title="Edit"><i class="fa-solid fa-pencil"></i></button>
+                    <i class="fa-solid fa-trash-can delete-btn" title="Delete"></i>
+                </div>
+            `;
+
+            item.querySelector('.delete-btn').addEventListener('pointerup', () => {
+                settings.gremlinWriterChaosOptions = settings.gremlinWriterChaosOptions.filter(o => o.id !== option.id);
+                saveSettingsDebounced();
+                renderChaosOptionsList();
+            });
+
+            item.querySelector('.pp-chaos-edit-btn').addEventListener('pointerup', () => {
+                showChaosOptionEditorPopup(option.id, renderChaosOptionsList);
+            });
+
+            item.querySelector(`#chaos-weight-${option.id}`).addEventListener('change', (e) => {
+                const newWeight = parseInt(e.target.value, 10);
+                if (!isNaN(newWeight) && newWeight > 0) {
+                    option.weight = newWeight;
+                    saveSettingsDebounced();
+                }
+            });
+
+            listElement.appendChild(item);
+        });
+    };
+
+    container.querySelector('#pp-add-chaos-option-btn').addEventListener('pointerup', () => {
+        showChaosOptionEditorPopup(null, renderChaosOptionsList);
+    });
+
+    renderChaosOptionsList();
+    callGenericPopup(container, POPUP_TYPE.DISPLAY, "Writer Chaos Mode Configuration", { wide: true, large: true, addCloseButton: true });
+}
+
+async function showChaosOptionEditorPopup(optionId, onSaveCallback) {
+    const settings = extension_settings[EXTENSION_NAME];
+    const isNew = optionId === null;
+    let option = isNew
+        ? { id: generateUUID(), api: 'openai', model: '', source: '', customUrl: '', preset: 'Default', weight: 1 }
+        : settings.gremlinWriterChaosOptions.find(o => o.id === optionId);
+
+    if (!option) {
+        window.toastr.error("Could not find chaos option to edit.");
+        return;
+    }
+
+    const popupContent = document.createElement('div');
+    popupContent.innerHTML = `
+        <div class="pp-custom-binding-inputs" style="display: flex; flex-direction: column; gap: 15px;">
+            <div>
+                <label for="pp_chaos_preset_selector">Parameter Preset:</label>
+                <select id="pp_chaos_preset_selector" class="text_pole"></select>
+            </div>
+            <hr>
+            <div>
+                <label for="pp_chaos_api_selector">API Provider:</label>
+                <select id="pp_chaos_api_selector" class="text_pole"></select>
+            </div>
+            <div id="pp_chaos_model_group">
+                <label for="pp_chaos_model_selector">Model:</label>
+                <select id="pp_chaos_model_selector" class="text_pole"></select>
+            </div>
+            <div id="pp_chaos_custom_model_group" style="display: none;">
+                <label for="pp_chaos_custom_model_input">Custom Model Name:</label>
+                <input type="text" id="pp_chaos_custom_model_input" class="text_pole" placeholder="e.g., My-Fine-Tune-v1">
+            </div>
+            <div id="pp_chaos_custom_url_group" style="display: none;">
+                <label for="pp_chaos_custom_url_input">Custom API URL:</label>
+                <input type="text" id="pp_chaos_custom_url_input" class="text_pole" placeholder="Enter your custom API URL">
+            </div>
+            <div id="pp_chaos_source_group" style="display: none;">
+                <label for="pp_chaos_source_input">Source (for some OpenAI-compatibles):</label>
+                <input type="text" id="pp_chaos_source_input" class="text_pole" placeholder="e.g., DeepSeek">
+            </div>
+            <hr>
+            <div>
+                <label for="pp_chaos_weight_input">Weight (higher is more likely):</label>
+                <input type="number" id="pp_chaos_weight_input" class="text_pole" value="${option.weight}" min="1" max="100">
+            </div>
+        </div>
+    `;
+
+    const presetSelect = popupContent.querySelector('#pp_chaos_preset_selector');
+    const apiSelect = popupContent.querySelector('#pp_chaos_api_selector');
+    const modelSelect = popupContent.querySelector('#pp_chaos_model_selector');
+    const modelGroup = popupContent.querySelector('#pp_chaos_model_group');
+    const customModelGroup = popupContent.querySelector('#pp_chaos_custom_model_group');
+    const customModelInput = popupContent.querySelector('#pp_chaos_custom_model_input');
+    const customUrlGroup = popupContent.querySelector('#pp_chaos_custom_url_group');
+    const customUrlInput = popupContent.querySelector('#pp_chaos_custom_url_input');
+    const sourceGroup = popupContent.querySelector('#pp_chaos_source_group');
+    const sourceInput = popupContent.querySelector('#pp_chaos_source_input');
+    const weightInput = popupContent.querySelector('#pp_chaos_weight_input');
+
+    // Populate Preset dropdown
+    const presetOptions = ['<option value="Default">Default</option>', ...Object.keys(openai_setting_names).map(name => `<option value="${name}">${name}</option>`)].join('');
+    presetSelect.innerHTML = presetOptions;
+    presetSelect.value = option.preset;
+
+    // Populate API Provider dropdown
+    for (const name of Object.values(chat_completion_sources)) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, ' $1').trim();
+        apiSelect.appendChild(opt);
+    }
+    apiSelect.value = option.api;
+
+    const populateModels = (api) => {
+        modelSelect.innerHTML = '';
+        let sourceSelect = null;
+
+        // CORRECTED: Smartly find the OpenRouter model list, wherever it may be.
+        if (api === chat_completion_sources.OPENROUTER) {
+            sourceSelect = document.querySelector('#model_openrouter_select');
+            if (!sourceSelect || sourceSelect.options.length <= 1) {
+                sourceSelect = document.querySelector('#openrouter_model');
+            }
+        } else {
+            const sourceSelectorId = API_TO_SELECTOR_MAP[api];
+            if (sourceSelectorId) {
+                sourceSelect = document.querySelector(sourceSelectorId);
+            }
+        }
+
+        const isCustom = api === chat_completion_sources.CUSTOM;
+        modelGroup.style.display = !isCustom ? 'block' : 'none';
+        customModelGroup.style.display = isCustom ? 'block' : 'none';
+        customUrlGroup.style.display = isCustom ? 'block' : 'none';
+        sourceGroup.style.display = ['openai', 'openrouter', 'custom'].includes(api) ? 'block' : 'none';
+
+        if (sourceSelect) {
+            Array.from(sourceSelect.childNodes).forEach(node => modelSelect.appendChild(node.cloneNode(true)));
+            if (modelSelect.options.length <= 1) {
+                modelSelect.innerHTML = '<option value="">-- No models loaded in main UI --</option>';
+            }
+        } else {
+             console.warn(`${LOG_PREFIX} Could not find any source model selector for Chaos Editor API: ${api}`);
+             modelSelect.innerHTML = '<option value="">-- No models found in main UI --</option>';
+        }
+    };
+
+    populateModels(option.api);
+    apiSelect.addEventListener('change', () => populateModels(apiSelect.value));
+
+    modelSelect.value = option.model;
+    customModelInput.value = option.model;
+    customUrlInput.value = option.customUrl;
+    sourceInput.value = option.source;
+
+    if (await callGenericPopup(popupContent, POPUP_TYPE.CONFIRM, isNew ? 'Add Chaos Option' : 'Edit Chaos Option')) {
+        const newApi = apiSelect.value;
+        const newModel = newApi === chat_completion_sources.CUSTOM ? customModelInput.value.trim() : modelSelect.value;
+
+        const updatedOption = {
+            id: option.id,
+            preset: presetSelect.value,
+            api: newApi,
+            model: newModel,
+            customUrl: newApi === chat_completion_sources.CUSTOM ? customUrlInput.value.trim() : '',
+            source: sourceInput.value.trim(),
+            weight: parseInt(weightInput.value, 10) || 1,
+        };
+
+        if (isNew) {
+            settings.gremlinWriterChaosOptions.push(updatedOption);
+        } else {
+            const index = settings.gremlinWriterChaosOptions.findIndex(o => o.id === optionId);
+            if (index !== -1) {
+                settings.gremlinWriterChaosOptions[index] = updatedOption;
+            }
+        }
+
+        saveSettingsDebounced();
+        if (onSaveCallback) onSaveCallback();
+        window.toastr.success(`Chaos option ${isNew ? 'added' : 'updated'}.`);
+    }
+}
+
+function selectChaosOption() {
+    const settings = extension_settings[EXTENSION_NAME];
+    if (!settings.gremlinWriterChaosOptions?.length) return null;
+
+    const options = settings.gremlinWriterChaosOptions;
+    const totalWeight = options.reduce((sum, opt) => sum + (Number(opt.weight) || 1), 0);
+    let random = Math.random() * totalWeight;
+    let chosenOption = null;
+
+    for (const option of options) {
+        random -= (Number(option.weight) || 1);
+        if (random <= 0) {
+            chosenOption = option;
+            break;
+        }
+    }
+    if (!chosenOption) chosenOption = options[0]; // Fallback
+
+    window.toastr.info(`Chaos roll: ${chosenOption.api} / ${chosenOption.model || 'Not Set'} / ${chosenOption.preset || 'Default'} (W: ${chosenOption.weight})`, "Project Gremlin", { timeOut: 5000 });
+    return chosenOption;
+}
+
+// *** END: NEW CHAOS MODE FUNCTIONS ***
+
 function handleSentenceCapitalization(messageIdOrElement) {
     if (!isAppReady) { console.warn(`${LOG_PREFIX} handleSentenceCapitalization called before app ready.`); return; }
     let messageElement;
@@ -625,11 +903,160 @@ async function onBeforeGremlinGeneration(type, generateArgsObject, dryRun) {
     return;
 }
 
+// This function is rewritten to be more robust by querying the DOM directly.
+function analyzeLatestAiMessage() {
+    if (!prosePolisherAnalyzer) {
+        return;
+    }
+
+    // 1. Get all rendered message elements from the DOM.
+    const allMessageElements = document.querySelectorAll('#chat .mes');
+    if (allMessageElements.length < 2) {
+        // Not enough messages to have an AI response to a user message.
+        return;
+    }
+
+    // 2. The second-to-last element is the most recent AI response.
+    const lastAiMessageElement = allMessageElements[allMessageElements.length - 2];
+
+    // 3. Perform robust checks on the DOM element itself.
+    if (!lastAiMessageElement || lastAiMessageElement.getAttribute('is_user') === 'true') {
+        // This isn't an AI message, so we stop.
+        return;
+    }
+
+    // 4. Get the ID from the `mesid` attribute, which is reliable.
+    const messageId = lastAiMessageElement.getAttribute('mesid');
+    if (!messageId) {
+        // This is the true "lacks an ID" case.
+        console.warn(`${LOG_PREFIX} Last AI message element found, but it lacks a 'mesid' attribute. Skipping analysis.`);
+        return;
+    }
+
+    // 5. Check if we've already processed this ID.
+    if (processedMessageIds.has(messageId)) {
+        return;
+    }
+
+    // 6. Get the text to analyze.
+    const messageTextElement = lastAiMessageElement.querySelector('.mes_text');
+    if (!messageTextElement || !messageTextElement.textContent.trim()) {
+        // No text content to analyze.
+        return;
+    }
+    const messageText = messageTextElement.textContent;
+
+    // --- All checks passed, proceed with analysis ---
+    console.log(`${LOG_PREFIX} Analyzing previous AI message (ID: ${messageId}).`);
+    processedMessageIds.add(messageId);
+
+    prosePolisherAnalyzer.incrementProcessedMessages();
+    prosePolisherAnalyzer.analyzeAndTrackFrequency(messageText);
+
+    if (extension_settings[EXTENSION_NAME].isDynamicEnabled) {
+        prosePolisherAnalyzer.messageCounterForTrigger++;
+        console.log(`${LOG_PREFIX} Dynamic trigger counter incremented to: ${prosePolisherAnalyzer.messageCounterForTrigger}`);
+    }
+
+    if (prosePolisherAnalyzer.totalAiMessagesProcessed % (extension_settings[EXTENSION_NAME].leaderboardUpdateCycle || 10) === 0) {
+        prosePolisherAnalyzer.pruneOldNgrams();
+        prosePolisherAnalyzer.performIntermediateAnalysis();
+        console.log(`${LOG_PREFIX} Performed periodic data processing and leaderboard update.`);
+    }
+}
+
+// This new function encapsulates the logic for triggering and running the AI rule generation.
+async function triggerDynamicRuleGenerationIfNeeded() {
+    if (!prosePolisherAnalyzer || prosePolisherAnalyzer.isProcessingAiRules || !extension_settings[EXTENSION_NAME].isDynamicEnabled) {
+        return; // Don't run if analyzer not ready, already processing, or dynamic learning is disabled.
+    }
+
+    const triggerCount = extension_settings[EXTENSION_NAME].dynamicTriggerCount;
+
+    // Check if the trigger conditions are met
+    if (prosePolisherAnalyzer.slopCandidates.size > 0 && prosePolisherAnalyzer.messageCounterForTrigger >= triggerCount) {
+        console.log(`${LOG_PREFIX} Dynamic rule generation triggered before Gremlin pipeline.`);
+        prosePolisherAnalyzer.messageCounterForTrigger = 0; // Reset counter immediately
+
+        // This logic is moved directly from the old `checkDynamicRuleTrigger` in analyzer.js
+        const getOriginalFromKey = (lemmatizedKey) => {
+            if (!lemmatizedKey) return lemmatizedKey;
+            const data = prosePolisherAnalyzer.ngramFrequencies.get(lemmatizedKey);
+            return data ? data.original : lemmatizedKey;
+        };
+        const slopCandidatesOriginal = Array.from(prosePolisherAnalyzer.slopCandidates).map(getOriginalFromKey);
+        const candidatesForAutoTriggerOriginal = slopCandidatesOriginal.slice(0, 50); // Using constant for clarity (TWINS_PRESCREEN_BATCH_SIZE)
+
+        if (candidatesForAutoTriggerOriginal.length > 0) {
+            window.toastr.info(`Prose Polisher: Auto-triggering Twins pre-screening for ${candidatesForAutoTriggerOriginal.length} candidates...`, "Project Gremlin");
+            
+            try {
+                const validCandidatesForGeneration = await prosePolisherAnalyzer.callTwinsForSlopPreScreening(candidatesForAutoTriggerOriginal, getCompiledRegexes());
+                
+                if (validCandidatesForGeneration.length > 0) {
+                    const BATCH_SIZE = 15; // Define or import constant
+                    const batchToProcess = validCandidatesForGeneration.slice(0, BATCH_SIZE); 
+                    prosePolisherAnalyzer.isProcessingAiRules = true; 
+                    let newRulesCount = 0;
+                    
+                    try {
+                        if (extension_settings[EXTENSION_NAME].regexGenerationMethod === 'twins') {
+                            window.toastr.info(`Prose Polisher: Auto-triggering Iterative Twins rule generation for ${batchToProcess.length} pre-screened candidates...`, "Project Gremlin");
+                            newRulesCount = await prosePolisherAnalyzer.generateRulesIterativelyWithTwins(batchToProcess, dynamicRules, extension_settings[EXTENSION_NAME].regexTwinsCycles);
+                        } else {
+                            const gremlinRoleForRegexGen = extension_settings[EXTENSION_NAME].regexGeneratorRole || 'writer';
+                            const roleForGenUpper = gremlinRoleForRegexGen.charAt(0).toUpperCase() + gremlinRoleForRegexGen.slice(1);
+                            window.toastr.info(`Prose Polisher: Auto-triggering Single Gremlin (${roleForGenUpper}) rule generation for ${batchToProcess.length} pre-screened candidates...`, "Project Gremlin");
+                            newRulesCount = await prosePolisherAnalyzer.generateAndSaveDynamicRulesWithSingleGremlin(batchToProcess, dynamicRules, gremlinRoleForRegexGen);
+                        }
+                    } finally {
+                        prosePolisherAnalyzer.isProcessingAiRules = false;
+                    }
+
+                    if (newRulesCount > 0) {
+                        // Clean up processed candidates from the slop list
+                        batchToProcess.forEach(processedCandidate => {
+                            let keyToDelete = null;
+                            for (const [lemmatizedKey, data] of prosePolisherAnalyzer.ngramFrequencies.entries()) {
+                                if (data.original === processedCandidate.candidate) {
+                                    keyToDelete = lemmatizedKey;
+                                    break;
+                                }
+                            }
+                            if (keyToDelete) {
+                                prosePolisherAnalyzer.slopCandidates.delete(keyToDelete);
+                                if (prosePolisherAnalyzer.ngramFrequencies.has(keyToDelete)) {
+                                    prosePolisherAnalyzer.ngramFrequencies.get(keyToDelete).score = 0; 
+                                }
+                            }
+                        });
+                        if (regexNavigator) regexNavigator.renderRuleList();
+                    }
+                } else {
+                    window.toastr.info("Prose Polisher: Twins' pre-screening found no valid candidates for auto-rule generation.", "Project Gremlin");
+                }
+            } catch (error) {
+                console.error(`${LOG_PREFIX} Error in auto-trigger pre-screening chain:`, error);
+                window.toastr.error("Error during auto-trigger pre-screening. See console.");
+                prosePolisherAnalyzer.isProcessingAiRules = false;
+            }
+        }
+    }
+}
+
 async function onUserMessageRenderedForGremlin(messageId) {
     if (!isAppReady) {
         console.warn(`[ProjectGremlin] onUserMessageRenderedForGremlin called before app ready for message ID ${messageId}.`);
         return;
     }
+    
+    // --- NEW RELIABLE FLOW ---
+    // 1. Analyze the last AI response that just occurred.
+    analyzeLatestAiMessage();
+
+    // 2. Check if the new analysis has met the conditions to trigger AI rule generation.
+    await triggerDynamicRuleGenerationIfNeeded();
+    // --- END OF NEW FLOW ---
 
     const settings = extension_settings[EXTENSION_NAME];
     const context = getContext();
@@ -657,10 +1084,16 @@ async function onUserMessageRenderedForGremlin(messageId) {
             ? auditorInstructionTemplateSetting
             : DEFAULT_AUDITOR_INSTRUCTIONS_TEMPLATE;
 
-
         if (settings.gremlinAuditorEnabled) {
             window.toastr.info("Gremlin Pipeline: Step 4 - Writer is crafting...", "Project Gremlin", { timeOut: 7000 });
-            if (!await applyGremlinEnvironment('writer')) throw new Error("Failed to configure Writer environment for Auditor path.");
+            
+            // Apply Writer Environment (Standard or Chaos)
+            if (settings.gremlinWriterChaosModeEnabled && settings.gremlinWriterChaosOptions?.length > 0) {
+                const chosenOption = selectChaosOption();
+                if (!chosenOption || !await applyGremlinWriterChaosOption(chosenOption)) throw new Error("Failed to configure chaotic Writer environment.");
+            } else {
+                if (!await applyGremlinEnvironment('writer')) throw new Error("Failed to configure Writer environment for Auditor path.");
+            }
             
             const writerSystemInstruction = writerTemplate.replace('{{BLUEPRINT}}', finalBlueprint);
             const writerProse = await executeGen(writerSystemInstruction);
@@ -671,7 +1104,15 @@ async function onUserMessageRenderedForGremlin(messageId) {
             finalInjectedInstruction = auditorTemplate.replace('{{WRITER_PROSE}}', writerProse);
         } else {
             window.toastr.info("Gremlin Pipeline: Handing off to Writer...", "Project Gremlin", { timeOut: 4000 });
-            if (!await applyGremlinEnvironment('writer')) throw new Error("Failed to configure Writer environment.");
+
+            // Apply Writer Environment (Standard or Chaos)
+            if (settings.gremlinWriterChaosModeEnabled && settings.gremlinWriterChaosOptions?.length > 0) {
+                const chosenOption = selectChaosOption();
+                if (!chosenOption || !await applyGremlinWriterChaosOption(chosenOption)) throw new Error("Failed to configure chaotic Writer environment.");
+            } else {
+                if (!await applyGremlinEnvironment('writer')) throw new Error("Failed to configure Writer environment.");
+            }
+
             finalInjectedInstruction = writerTemplate.replace('{{BLUEPRINT}}', finalBlueprint);
         }
 
@@ -689,40 +1130,6 @@ async function onUserMessageRenderedForGremlin(messageId) {
         }
     }
 }
-
-function onAiCharacterMessageRendered(messageElement) {
-    if (!isAppReady) {
-        console.warn(`${LOG_PREFIX} onAiCharacterMessageRendered called too early. isAppReady: ${isAppReady}`);
-        return;
-    }
-    const messageId = messageElement.getAttribute('mesid');
-    const context = getContext();
-    const message = context.chat.find(msg => String(msg.id) === String(messageId));
-    if (!message || message.is_user) return;
-
-    let messageToAnalyze = message.mes;
-    const originalMessageForRegex = messageToAnalyze;
-    if (!extension_settings[EXTENSION_NAME].integrateWithGlobalRegex) {
-        const replacedMessage = applyProsePolisherReplacements(originalMessageForRegex);
-        if (replacedMessage !== originalMessageForRegex) {
-            message.mes = replacedMessage;
-            const mesTextElement = messageElement.querySelector('.mes_text');
-            if (mesTextElement) mesTextElement.innerHTML = replacedMessage; 
-            messageToAnalyze = replacedMessage;
-        }
-    }
-
-    if (prosePolisherAnalyzer) {
-        prosePolisherAnalyzer.incrementProcessedMessages();
-        prosePolisherAnalyzer.analyzeAndTrackFrequency(messageToAnalyze);
-        if (prosePolisherAnalyzer.totalAiMessagesProcessed % PRUNE_CHECK_INTERVAL === 0) {
-            prosePolisherAnalyzer.pruneOldNgrams();
-        }
-        prosePolisherAnalyzer.checkDynamicRuleTrigger(dynamicRules, regexNavigator);
-    }
-    handleSentenceCapitalization(messageElement); 
-}
-
 
 // RegexNavigator class
 class RegexNavigator {
@@ -945,6 +1352,40 @@ async function initializeExtensionCore() {
             if (!isNaN(value) && value >= 1) { settings.dynamicTriggerCount = value; saveSettingsDebounced(); }
         });
 
+        // Bind new analysis settings
+        const slopThresholdInput = document.getElementById('prose_polisher_slop_threshold');
+        const leaderboardUpdateCycleInput = document.getElementById('prose_polisher_leaderboard_update_cycle');
+        const pruningCycleInput = document.getElementById('prose_polisher_pruning_cycle');
+        const ngramMaxInput = document.getElementById('prose_polisher_ngram_max');
+        const patternMinCommonInput = document.getElementById('prose_polisher_pattern_min_common');
+
+        slopThresholdInput.value = settings.slopThreshold;
+        leaderboardUpdateCycleInput.value = settings.leaderboardUpdateCycle;
+        pruningCycleInput.value = settings.pruningCycle;
+        ngramMaxInput.value = settings.ngramMax;
+        patternMinCommonInput.value = settings.patternMinCommon;
+
+        slopThresholdInput.addEventListener('input', () => {
+            const value = parseFloat(slopThresholdInput.value);
+            if (!isNaN(value) && value >= 1) { settings.slopThreshold = value; saveSettingsDebounced(); }
+        });
+        leaderboardUpdateCycleInput.addEventListener('input', () => {
+            const value = parseInt(leaderboardUpdateCycleInput.value, 10);
+            if (!isNaN(value) && value >= 1) { settings.leaderboardUpdateCycle = value; saveSettingsDebounced(); }
+        });
+        pruningCycleInput.addEventListener('input', () => {
+            const value = parseInt(pruningCycleInput.value, 10);
+            if (!isNaN(value) && value >= 5) { settings.pruningCycle = value; saveSettingsDebounced(); }
+        });
+        ngramMaxInput.addEventListener('input', () => {
+            const value = parseInt(ngramMaxInput.value, 10);
+            if (!isNaN(value) && value >= 3 && value <= 20) { settings.ngramMax = value; saveSettingsDebounced(); }
+        });
+        patternMinCommonInput.addEventListener('input', () => {
+            const value = parseInt(patternMinCommonInput.value, 10);
+            if (!isNaN(value) && value >= 2 && value <= 10) { settings.patternMinCommon = value; saveSettingsDebounced(); }
+        });
+
         regexNavigator = new RegexNavigator();
         document.getElementById('prose_polisher_open_navigator_button').addEventListener('pointerup', () => regexNavigator.open());
         document.getElementById('prose_polisher_analyze_chat_button').addEventListener('pointerup', () => prosePolisherAnalyzer?.manualAnalyzeChatHistory());
@@ -1067,6 +1508,19 @@ async function initializeExtensionCore() {
         document.getElementById('pp_gremlinMamaEnabled').addEventListener('change', (e) => { settings.gremlinMamaEnabled = e.target.checked; saveSettingsDebounced(); });
         document.getElementById('pp_gremlinAuditorEnabled').addEventListener('change', (e) => { settings.gremlinAuditorEnabled = e.target.checked; saveSettingsDebounced(); });
 
+        // NEW: Bind Writer Chaos Mode controls
+        const writerChaosToggle = document.getElementById('pp_gremlinWriterChaosModeEnabled');
+        const configureChaosBtn = document.getElementById('pp_configure_writer_chaos_btn');
+
+        writerChaosToggle.checked = settings.gremlinWriterChaosModeEnabled;
+        writerChaosToggle.addEventListener('change', () => {
+            settings.gremlinWriterChaosModeEnabled = writerChaosToggle.checked;
+            saveSettingsDebounced();
+            window.toastr.info(`Writer Chaos Mode ${settings.gremlinWriterChaosModeEnabled ? 'enabled' : 'disabled'}.`);
+        });
+        configureChaosBtn.addEventListener('pointerup', () => showWriterChaosConfigPopup());
+
+
         injectNavigatorModal(); 
         const gremlinPresetNavigator = new PresetNavigator();
         gremlinPresetNavigator.init();
@@ -1112,7 +1566,7 @@ async function initializeExtensionCore() {
 
             eventSource.on(event_types.GENERATION_AFTER_COMMANDS, onBeforeGremlinGeneration);
             eventSource.makeLast(event_types.USER_MESSAGE_RENDERED, (messageId) => onUserMessageRenderedForGremlin(messageId)); 
-            eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (messageId, messageElement) => onAiCharacterMessageRendered(messageElement)); 
+            eventSource.on(event_types.chat_id_changed, () => { processedMessageIds.clear(); console.log(`${LOG_PREFIX} Chat changed, cleared processed message ID cache.`); });
 
             await updateGlobalRegexArray();
             compileInternalActiveRules(); 

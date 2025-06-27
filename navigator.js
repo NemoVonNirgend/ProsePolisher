@@ -1,4 +1,3 @@
-// C:\SillyTavern\public\scripts\extensions\third-party\ProsePolisher\navigator.js
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import { openai_setting_names } from '../../../../scripts/openai.js';
 
@@ -6,7 +5,7 @@ const LOG_PREFIX = `[ProsePolisher:Navigator]`;
 // CHANGED: Using a unique localStorage key to prevent conflicts with other extensions.
 const PROSE_POLISHER_METADATA_KEY = 'prosePolisherNavigatorMetadata';
 
-function generateUUID() {
+export function generateUUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
         var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
         return v.toString(16);

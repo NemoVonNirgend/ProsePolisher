@@ -1,6 +1,3 @@
-// C:\SillyTavern\public\scripts\extensions\third-party\ProsePolisher\lemmas.js
-// A simple, fast map for reducing common English words to their root form (lemma).
-// This is not exhaustive but covers high-frequency cases to improve pattern matching.
 export const lemmaMap = new Map([
     // Verbs (to be)
     ['is', 'be'], ['was', 'be'], ['are', 'be'], ['were', 'be'], ['being', 'be'], ['been', 'be'],
