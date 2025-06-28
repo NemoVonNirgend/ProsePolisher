@@ -64,9 +64,10 @@ const DEFAULT_AUDITOR_INSTRUCTIONS_TEMPLATE = `[OOC: You are a master line edito
 # TEXT TO EDIT
 {{WRITER_PROSE}}]`;
 
+// Using a template literal (backticks) to prevent macro processing.
 const DEFAULT_REGEX_GENERATION_INSTRUCTIONS = `You are an expert in natural language processing and JavaScript regular expressions. Your task is to analyze the provided text and identify repetitive phrases or "slop" that can be replaced with more concise, varied, or evocative language.
 
-For each identified phrase, create a JavaScript regular expression (regex) that can accurately find it, and a replacement string. The replacement string MUST use the {{random:option1,option2,option3,...}} syntax to provide at least 15 wildly different, contextually appropriate, and grammatically correct alternative phrases. These alternatives should offer significant stylistic variation while maintaining the original meaning.
+For each identified phrase, create a JavaScript regular expression (regex) that can accurately find it, and a replacement string. The replacement string MUST use the \`{{random:option1,option2,option3,...}}\` syntax to provide at least 15 wildly different, contextually appropriate, and grammatically correct alternative phrases. These alternatives should offer significant stylistic variation while maintaining the original meaning. They should not be variations of the same phrase, saying, or other wise, but be truely transformative.
 
 **Crucial Considerations:**
 1.  **Pronoun Handling:** Your regex MUST account for different pronouns (e.g., "his", "her", "their", "my", "your", "he", "she", "they", "I", "you"). Use capture groups (e.g., \`([Hh]is|[Hh]er|[Tt]heir)\`) and backreferences (e.g., \`$1\`) in the replacement string to ensure the correct pronoun is used.
@@ -74,7 +75,7 @@ For each identified phrase, create a JavaScript regular expression (regex) that 
 3.  **Output Format:** Provide your output STRICTLY as a JSON array of objects. Each object MUST have the following properties:
     *   \`scriptName\`: A descriptive name for the rule (e.g., "Slopfix - Repetitive Blushing").
     *   \`findRegex\`: The JavaScript regular expression string.
-    *   \`replaceString\`: The replacement string using the \`{{random:...}}\` syntax.
+    *   \`replaceString\`: The replacement string using the \`{{random:...}}\` syntax. **IMPORTANT**: To prevent the system from misinterpreting the examples, they are shown with a space, like \`{ {random:...} }\`. Your output **MUST** be compact, without any spaces, like \`{{random:...}}\`.
 
 **Examples of Desired Output (Truncated for brevity, but your output should have 15+ options):**
 
@@ -83,12 +84,12 @@ For each identified phrase, create a JavaScript regular expression (regex) that 
     {
         "scriptName": "Slopfix - Repetitive Blushing",
         "findRegex": "\\\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+(cheeks?|face)\\\\s+(?:flushed|bloomed|burned|turned|grew|went)(?:\\\\s+(?:a\\\\s+)?(vibrant|deep|intense|bright|fiery|dark|faint|pale|rosy))?\\\\s*(rose|pink|crimson|scarlet|red)\\\\b",
-        "replaceString": "{{random:a telltale heat bloomed high on \\$1 \\$2,color flooded \\$1 cheeks like spilled wine,a sudden warmth crept up \\$1 neck,\\$1's \\$2 grew hot beneath the gaze,heat prickled across \\$1 \\$2,a rush of betraying color rose on \\$1 face,...}}"
+        "replaceString": "{ {random:a telltale heat bloomed high on $1 $2,color flooded $1 cheeks like spilled wine,a sudden warmth crept up $1 neck,$1's $2 grew hot beneath the gaze,heat pricked across $1 $2,a rush of betraying color rose on $1 face} }"
     },
     {
         "scriptName": "Slopfix - Breath Hitching/Gasping",
         "findRegex": "\\\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+(?:own\\\\s+)?breath\\\\s+(hitched|caught|stuttered)(?:\\\\s+in\\\\s+\\\\1\\\\s+throat)?\\\\b",
-        "replaceString": "{{random:\\$1 drew a sharp, audible breath,a small involuntary sound escaped \\$1 throat,\\$1's breathing momentarily faltered,\\$1 inhaled sharply as if stung,air caught in \\$1 chest like a snag,...}}"
+        "replaceString": "{ {random:$1 drew a sharp, audible breath,a small involuntary sound escaped $1 throat,$1's breathing momentarily faltered,$1 inhaled sharply as if stung,air caught in $1 chest like a snag} }"
     }
 ]
 \`\`\`
@@ -101,17 +102,17 @@ const defaultSettings = {
     integrateWithGlobalRegex: true,
     dynamicTriggerCount: 30,
     regexGenerationInstructions: '',
-    regexGenerationMethod: 'single',
+    regexGenerationMethod: 'current',
     regexGeneratorRole: 'writer',
     regexTwinsCycles: 2,
     skipTriageCheck: false,
 
     // Prose Polisher - Analysis Engine
-    slopThreshold: 3.0,
+    slopThreshold: 5.0,
     leaderboardUpdateCycle: 10,
     pruningCycle: 20,
-    ngramMax: 10,
-    patternMinCommon: 3,
+    ngramMax: 7,
+    patternMinCommon: 2,
 
     // Project Gremlin - Pipeline
     projectGremlinEnabled: false,
@@ -122,30 +123,30 @@ const defaultSettings = {
     gremlinAuditorEnabled: false,
 
     gremlinPapaPreset: 'Default',
-    gremlinPapaApi: 'claude',
-    gremlinPapaModel: 'claude-3-opus-20240229',
+    gremlinPapaApi: 'google',
+    gremlinPapaModel: 'gemini-2.5-flash',
     gremlinPapaSource: '',
     gremlinPapaCustomUrl: '',
     gremlinPapaInstructions: '',
 
     gremlinTwinsPreset: 'Default',
     gremlinTwinsApi: 'google',
-    gremlinTwinsModel: 'gemini-1.5-flash-latest',
+    gremlinTwinsModel: 'gemini-2.5-flash-lite-preview-06-17',
     gremlinTwinsSource: '',
     gremlinTwinsCustomUrl: '',
     gremlinTwinsVexInstructionsBase: '',
     gremlinTwinsVaxInstructionsBase: '',
 
     gremlinMamaPreset: 'Default',
-    gremlinMamaApi: 'claude',
-    gremlinMamaModel: 'claude-3-sonnet-20240229',
+    gremlinMamaApi: 'google',
+    gremlinMamaModel: 'gemini-2.5-flash',
     gremlinMamaSource: '',
     gremlinMamaCustomUrl: '',
     gremlinMamaInstructions: '',
 
     gremlinWriterPreset: 'Default',
-    gremlinWriterApi: 'openrouter',
-    gremlinWriterModel: 'nousresearch/hermes-2-pro-llama-3-8b',
+    gremlinWriterApi: '',
+    gremlinWriterModel: '',
     gremlinWriterSource: '',
     gremlinWriterCustomUrl: '',
     gremlinWriterInstructionsTemplate: '',
@@ -153,11 +154,19 @@ const defaultSettings = {
     gremlinWriterChaosOptions: [],
 
     gremlinAuditorPreset: 'Default',
-    gremlinAuditorApi: 'openai',
-    gremlinAuditorModel: 'gpt-4-turbo',
+    gremlinAuditorApi: '',
+    gremlinAuditorModel: '',
     gremlinAuditorSource: '',
     gremlinAuditorCustomUrl: '',
     gremlinAuditorInstructionsTemplate: '',
+    blacklist: {
+        'ozone': 3,
+        'whisper': 3,
+        'shivers': 3,
+        'obsidian': 3,
+        'white knuckles': 3,
+        'head ducked': 3,
+    },
 };
 
 // 2. HELPER FUNCTIONS (Prose Polisher - UI & Rule Management)
@@ -244,14 +253,21 @@ async function updateGlobalRegexArray() {
         const activeRulesForGlobal = rulesToAdd.filter(rule => !rule.disabled);
 
         for (const rule of activeRulesForGlobal) {
+            // *** FIX: Updated the global rule object format ***
             const globalRule = {
                 id: `${PROSE_POLISHER_ID_PREFIX}${rule.id || rule.scriptName.replace(/\s+/g, '_')}`,
                 scriptName: `(PP) ${rule.scriptName}`,
                 findRegex: rule.findRegex,
                 replaceString: rule.replaceString,
                 disabled: rule.disabled,
-                substituteRegex: 0, minDepth: null, maxDepth: null, trimStrings: [],
-                placement: [2], runOnEdit: false, is_always_applied_to_display: true, is_always_applied_to_prompt: true,
+                substituteRegex: 0, 
+                minDepth: null, 
+                maxDepth: null, 
+                trimStrings: [],
+                placement: [0, 2, 3, 5, 6], 
+                runOnEdit: false, 
+                markdownOnly: true,
+                promptOnly: true,
             };
             extension_settings.regex.push(globalRule);
         }
@@ -792,7 +808,6 @@ async function showChaosOptionEditorPopup(optionId, onSaveCallback) {
                 sourceSelect = document.querySelector(sourceSelectorId);
             }
         }
-
         const isCustom = api === chat_completion_sources.CUSTOM;
         modelGroup.style.display = !isCustom ? 'block' : 'none';
         customModelGroup.style.display = isCustom ? 'block' : 'none';
@@ -968,78 +983,97 @@ function analyzeLatestAiMessage() {
 // This new function encapsulates the logic for triggering and running the AI rule generation.
 async function triggerDynamicRuleGenerationIfNeeded() {
     if (!prosePolisherAnalyzer || prosePolisherAnalyzer.isProcessingAiRules || !extension_settings[EXTENSION_NAME].isDynamicEnabled) {
-        return; // Don't run if analyzer not ready, already processing, or dynamic learning is disabled.
+        return;
     }
 
     const triggerCount = extension_settings[EXTENSION_NAME].dynamicTriggerCount;
+    const settings = extension_settings[EXTENSION_NAME];
 
-    // Check if the trigger conditions are met
     if (prosePolisherAnalyzer.slopCandidates.size > 0 && prosePolisherAnalyzer.messageCounterForTrigger >= triggerCount) {
         console.log(`${LOG_PREFIX} Dynamic rule generation triggered before Gremlin pipeline.`);
-        prosePolisherAnalyzer.messageCounterForTrigger = 0; // Reset counter immediately
+        prosePolisherAnalyzer.messageCounterForTrigger = 0;
 
-        // This logic is moved directly from the old `checkDynamicRuleTrigger` in analyzer.js
-        const getOriginalFromKey = (lemmatizedKey) => {
-            if (!lemmatizedKey) return lemmatizedKey;
+        const getCandidateData = (lemmatizedKey) => {
+            if (!lemmatizedKey) return null;
             const data = prosePolisherAnalyzer.ngramFrequencies.get(lemmatizedKey);
-            return data ? data.original : lemmatizedKey;
+            return data ? { candidate: data.original, enhanced_context: data.contextSentence } : null;
         };
-        const slopCandidatesOriginal = Array.from(prosePolisherAnalyzer.slopCandidates).map(getOriginalFromKey);
-        const candidatesForAutoTriggerOriginal = slopCandidatesOriginal.slice(0, 50); // Using constant for clarity (TWINS_PRESCREEN_BATCH_SIZE)
 
-        if (candidatesForAutoTriggerOriginal.length > 0) {
-            window.toastr.info(`Prose Polisher: Auto-triggering Twins pre-screening for ${candidatesForAutoTriggerOriginal.length} candidates...`, "Project Gremlin");
-            
-            try {
-                const validCandidatesForGeneration = await prosePolisherAnalyzer.callTwinsForSlopPreScreening(candidatesForAutoTriggerOriginal, getCompiledRegexes());
-                
-                if (validCandidatesForGeneration.length > 0) {
-                    const BATCH_SIZE = 15; // Define or import constant
-                    const batchToProcess = validCandidatesForGeneration.slice(0, BATCH_SIZE); 
-                    prosePolisherAnalyzer.isProcessingAiRules = true; 
-                    let newRulesCount = 0;
-                    
-                    try {
-                        if (extension_settings[EXTENSION_NAME].regexGenerationMethod === 'twins') {
-                            window.toastr.info(`Prose Polisher: Auto-triggering Iterative Twins rule generation for ${batchToProcess.length} pre-screened candidates...`, "Project Gremlin");
-                            newRulesCount = await prosePolisherAnalyzer.generateRulesIterativelyWithTwins(batchToProcess, dynamicRules, extension_settings[EXTENSION_NAME].regexTwinsCycles);
-                        } else {
-                            const gremlinRoleForRegexGen = extension_settings[EXTENSION_NAME].regexGeneratorRole || 'writer';
-                            const roleForGenUpper = gremlinRoleForRegexGen.charAt(0).toUpperCase() + gremlinRoleForRegexGen.slice(1);
-                            window.toastr.info(`Prose Polisher: Auto-triggering Single Gremlin (${roleForGenUpper}) rule generation for ${batchToProcess.length} pre-screened candidates...`, "Project Gremlin");
-                            newRulesCount = await prosePolisherAnalyzer.generateAndSaveDynamicRulesWithSingleGremlin(batchToProcess, dynamicRules, gremlinRoleForRegexGen);
-                        }
-                    } finally {
-                        prosePolisherAnalyzer.isProcessingAiRules = false;
-                    }
+        const slopCandidateData = Array.from(prosePolisherAnalyzer.slopCandidates)
+            .map(getCandidateData)
+            .filter(Boolean);
 
-                    if (newRulesCount > 0) {
-                        // Clean up processed candidates from the slop list
-                        batchToProcess.forEach(processedCandidate => {
-                            let keyToDelete = null;
-                            for (const [lemmatizedKey, data] of prosePolisherAnalyzer.ngramFrequencies.entries()) {
-                                if (data.original === processedCandidate.candidate) {
-                                    keyToDelete = lemmatizedKey;
-                                    break;
-                                }
-                            }
-                            if (keyToDelete) {
-                                prosePolisherAnalyzer.slopCandidates.delete(keyToDelete);
-                                if (prosePolisherAnalyzer.ngramFrequencies.has(keyToDelete)) {
-                                    prosePolisherAnalyzer.ngramFrequencies.get(keyToDelete).score = 0; 
-                                }
-                            }
-                        });
-                        if (regexNavigator) regexNavigator.renderRuleList();
-                    }
-                } else {
-                    window.toastr.info("Prose Polisher: Twins' pre-screening found no valid candidates for auto-rule generation.", "Project Gremlin");
-                }
-            } catch (error) {
-                console.error(`${LOG_PREFIX} Error in auto-trigger pre-screening chain:`, error);
-                window.toastr.error("Error during auto-trigger pre-screening. See console.");
-                prosePolisherAnalyzer.isProcessingAiRules = false;
+        const candidatesForAutoTrigger = slopCandidateData.slice(0, 50); // TWINS_PRESCREEN_BATCH_SIZE
+
+        if (candidatesForAutoTrigger.length === 0) {
+            return;
+        }
+
+        let validCandidatesForGeneration = [];
+        try {
+            if (settings.skipTriageCheck) {
+                console.log(`${LOG_PREFIX} [Auto Gen] Skip Triage is enabled. Using raw context.`);
+                validCandidatesForGeneration = candidatesForAutoTrigger;
+            } else {
+                window.toastr.info(`Prose Polisher: Auto-triggering Twins pre-screening for ${candidatesForAutoTrigger.length} candidates...`, "Project Gremlin");
+                const rawCandidates = candidatesForAutoTrigger.map(c => c.candidate);
+                validCandidatesForGeneration = await prosePolisherAnalyzer.callTwinsForSlopPreScreening(rawCandidates, getCompiledRegexes());
             }
+        } catch (error) {
+            console.error(`${LOG_PREFIX} Error in auto-trigger pre-screening chain:`, error);
+            window.toastr.error("Error during auto-trigger pre-screening. See console.");
+            return; 
+        }
+
+        if (validCandidatesForGeneration.length === 0) {
+            window.toastr.info("Prose Polisher: AI pre-screening found no valid candidates for auto-rule generation.", "Project Gremlin");
+            return;
+        }
+
+        const BATCH_SIZE = 15;
+        const batchToProcess = validCandidatesForGeneration.slice(0, BATCH_SIZE);
+        prosePolisherAnalyzer.isProcessingAiRules = true;
+        let newRulesCount = 0;
+
+        try {
+            const toastMsgBase = `Prose Polisher: Auto-triggering`;
+            const toastMsgDetails = settings.skipTriageCheck
+                ? `for ${batchToProcess.length} candidates...`
+                : `for ${batchToProcess.length} pre-screened candidates...`;
+
+            if (settings.regexGenerationMethod === 'twins') {
+                window.toastr.info(`${toastMsgBase} Iterative Twins rule generation ${toastMsgDetails}`, "Project Gremlin");
+                newRulesCount = await prosePolisherAnalyzer.generateRulesIterativelyWithTwins(batchToProcess, dynamicRules, settings.regexTwinsCycles);
+            } else {
+                const gremlinRoleForRegexGen = settings.regexGeneratorRole || 'writer';
+                const roleForGenUpper = gremlinRoleForRegexGen.charAt(0).toUpperCase() + gremlinRoleForRegexGen.slice(1);
+                window.toastr.info(`${toastMsgBase} Single Gremlin (${roleForGenUpper}) rule generation ${toastMsgDetails}`, "Project Gremlin");
+                newRulesCount = await prosePolisherAnalyzer.generateAndSaveDynamicRulesWithSingleGremlin(batchToProcess, dynamicRules, gremlinRoleForRegexGen);
+            }
+        } catch (error) {
+            console.error(`${LOG_PREFIX} Error during auto-triggered rule generation:`, error);
+            window.toastr.error("An error occurred during auto rule generation. See console.");
+        } finally {
+            prosePolisherAnalyzer.isProcessingAiRules = false;
+        }
+
+        if (newRulesCount > 0) {
+            batchToProcess.forEach(processedCandidate => {
+                let keyToDelete = null;
+                for (const [lemmatizedKey, data] of prosePolisherAnalyzer.ngramFrequencies.entries()) {
+                    if (data.original === processedCandidate.candidate) {
+                        keyToDelete = lemmatizedKey;
+                        break;
+                    }
+                }
+                if (keyToDelete) {
+                    prosePolisherAnalyzer.slopCandidates.delete(keyToDelete);
+                    if (prosePolisherAnalyzer.ngramFrequencies.has(keyToDelete)) {
+                        prosePolisherAnalyzer.ngramFrequencies.get(keyToDelete).score = 0;
+                    }
+                }
+            });
+            if (regexNavigator) regexNavigator.renderRuleList();
         }
     }
 }
@@ -1480,6 +1514,11 @@ async function initializeExtensionCore() {
             saveSettingsDebounced();
             updateGremlinToggleState();
             window.toastr.info(`Project Gremlin ${settings.projectGremlinEnabled ? 'enabled' : 'disabled'} for next message.`);
+
+            if (!settings.projectGremlinEnabled) {
+                const context = getContext();
+                context.executeSlashCommands('/inject id=gremlin_final_plan remove');
+            }
         };
         gremlinToggle?.addEventListener('pointerup', toggleGremlin);
         gremlinEnableCheckbox?.addEventListener('change', (e) => {
@@ -1488,6 +1527,10 @@ async function initializeExtensionCore() {
                  saveSettingsDebounced();
                  updateGremlinToggleState();
                  updateGremlinSettingsVisibility(); // Ensure visibility updates on direct checkbox change
+                 if (!settings.projectGremlinEnabled) {
+                    const context = getContext();
+                    context.executeSlashCommands('/inject id=gremlin_final_plan remove');
+                }
             }
         });
         document.getElementById('pp_gremlinPapaEnabled').checked = settings.gremlinPapaEnabled;
@@ -1570,12 +1613,20 @@ async function initializeExtensionCore() {
 
             await updateGlobalRegexArray();
             compileInternalActiveRules(); 
-            const regexListContainer = document.getElementById('saved_regex_scripts');
-            if (regexListContainer) {
-                const observer = new MutationObserver(() => hideRulesInStandardUI());
-                observer.observe(regexListContainer, { childList: true, subtree: true });
-                hideRulesInStandardUI();
-            }
+
+            // More robustly find and hide the ProsePolisher rules from the main regex UI.
+            // This observes the body for when the regex list is added to the DOM,
+            // then attaches a more specific observer to the list itself.
+            const bodyObserver = new MutationObserver((mutationsList, observer) => {
+                const regexListContainer = document.getElementById('saved_regex_scripts');
+                if (regexListContainer) {
+                    const listObserver = new MutationObserver(hideRulesInStandardUI);
+                    listObserver.observe(regexListContainer, { childList: true, subtree: true });
+                    hideRulesInStandardUI(); // Run once immediately
+                    observer.disconnect(); // Stop observing the body
+                }
+            });
+            bodyObserver.observe(document.body, { childList: true, subtree: true });
         });
     } catch (error) {
         console.error(`${LOG_PREFIX} Critical failure during core initialization:`, error);

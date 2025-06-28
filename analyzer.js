@@ -22,13 +22,20 @@ function stripMarkup(text) {
     if (!text) return '';
     let cleanText = text;
 
+    // Remove code blocks first
     cleanText = cleanText.replace(/(?:```|~~~)\w*\s*[\s\S]*?(?:```|~~~)/g, ' ');
+    // Remove specific HTML tags and their content
     cleanText = cleanText.replace(/<(info_panel|memo|code|pre|script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
+    // Remove any remaining HTML tags
     cleanText = cleanText.replace(/<[^>]*>/g, ' ');
+    // Remove markdown emphasis but keep the text
     cleanText = cleanText.replace(/(?:\*|_|~|`)+(.+?)(?:\*|_|~|`)+/g, '$1');
-    cleanText = cleanText.replace(/"(.*?)"/g, '$1');
-    cleanText = cleanText.replace(/\((.*?)\)/g, '$1');
-    cleanText = cleanText.trim().replace(/^[\s*]+|[\s*]+$/g, '');
+    // Remove content in quotes and parentheses, which often cause fragments
+    cleanText = cleanText.replace(/"(.*?)"/g, ' $1 ');
+    cleanText = cleanText.replace(/\((.*?)\)/g, ' $1 ');
+    // Collapse multiple spaces and trim
+    cleanText = cleanText.replace(/\s+/g, ' ').trim();
+
     return cleanText;
 }
 
@@ -123,11 +130,10 @@ export class Analyzer {
         const blacklist = this.settings.blacklist || {};
         if (Object.keys(blacklist).length === 0) return 0;
         const lowerCasePhrase = phrase.toLowerCase();
-        const words = lowerCasePhrase.split(/\s+/).filter(w => w);
         let maxWeight = 0;
-        for (const word of words) {
-            if (blacklist[word]) {
-                maxWeight = Math.max(maxWeight, blacklist[word]);
+        for (const blacklistedTerm in blacklist) {
+            if (lowerCasePhrase.includes(blacklistedTerm)) {
+                maxWeight = Math.max(maxWeight, blacklist[blacklistedTerm]);
             }
         }
         return maxWeight;
@@ -140,23 +146,16 @@ export class Analyzer {
         const NGRAM_MAX = this.settings.ngramMax || 10;
         const SLOP_THRESHOLD = this.settings.slopThreshold || 3.0;
 
-        const chunks = [];
-        let lastIndex = 0;
-        cleanText.replace(/(["'])(?:(?=(\\?))\2.)*?\1/g, (match, quote, offset) => {
-            if (offset > lastIndex) {
-                chunks.push({ content: cleanText.substring(lastIndex, offset), type: 'narration' });
-            }
-            chunks.push({ content: match, type: 'dialogue' });
-            lastIndex = offset + match.length;
-        });
-        if (lastIndex < cleanText.length) {
-            chunks.push({ content: cleanText.substring(lastIndex), type: 'narration' });
-        }
+        // CRITICAL CHANGE: Split text into sentences first to prevent cross-sentence n-grams.
+        const sentences = cleanText.match(/[^.!?]+[.!?]+["]?/g) || [cleanText];
 
-        for (const chunk of chunks) {
-            if (!chunk.content.trim()) continue;
+        for (const sentence of sentences) {
+            if (!sentence.trim()) continue;
 
-            const originalWords = chunk.content.replace(/[.,!?]/g, '').toLowerCase().split(/\s+/).filter(Boolean);
+            const isDialogue = /["']/.test(sentence.trim().substring(0, 10));
+            const chunkType = isDialogue ? 'dialogue' : 'narration';
+
+            const originalWords = sentence.replace(/[.,!?]/g, '').toLowerCase().split(/\s+/).filter(Boolean);
             const lemmatizedWords = originalWords.map(word => lemmaMap.get(word) || word);
 
             for (let n = NGRAM_MIN; n <= NGRAM_MAX; n++) {
@@ -169,12 +168,11 @@ export class Analyzer {
                     const originalNgram = originalNgrams[i];
                     const lemmatizedNgram = lemmatizedNgrams[i];
 
-                    // Updated filtering logic: removed isPhraseWhitelistedLocal
                     if (this.compiledRegexes.some(regex => regex.test(originalNgram.toLowerCase())) || this.isPhraseLowQuality(originalNgram)) {
                         continue;
                     }
 
-                    const currentData = this.ngramFrequencies.get(lemmatizedNgram) || { count: 0, score: 0, lastSeenMessageIndex: this.totalAiMessagesProcessed, original: originalNgram };
+                    const currentData = this.ngramFrequencies.get(lemmatizedNgram) || { count: 0, score: 0, lastSeenMessageIndex: this.totalAiMessagesProcessed, original: originalNgram, contextSentence: sentence };
 
                     let scoreIncrement = 1.0;
                     
@@ -182,7 +180,7 @@ export class Analyzer {
                     const uncommonWordCount = originalNgram.split(' ').reduce((count, word) => count + (this.effectiveWhitelist.has(word) ? 0 : 1), 0);
                     scoreIncrement += uncommonWordCount * 0.5;
                     scoreIncrement += this.getBlacklistWeight(originalNgram);
-                    if (chunk.type === 'narration') {
+                    if (chunkType === 'narration') {
                         scoreIncrement *= 1.25;
                     }
 
@@ -194,6 +192,7 @@ export class Analyzer {
                         score: newScore,
                         lastSeenMessageIndex: this.totalAiMessagesProcessed,
                         original: originalNgram, 
+                        contextSentence: sentence,
                     });
 
                     if (newScore >= SLOP_THRESHOLD && currentData.score < SLOP_THRESHOLD) { 
@@ -444,10 +443,11 @@ Strictly adhere to the JSON format. Do not add any other text.`;
                 const jsonMatch = rawResponse.match(/```json\s*([\s\S]*?)\s*```|(\[[\s\S]*?\])/s);
                 if (jsonMatch) {
                     const jsonString = jsonMatch[1] || jsonMatch[2];
-                    twinResults = JSON.parse(jsonString);
+                    const parsedData = JSON.parse(jsonString);
+                    twinResults = Array.isArray(parsedData) ? parsedData : [parsedData];
                 } else {
-                     twinResults = JSON.parse(rawResponse); 
-                     if (!Array.isArray(twinResults)) throw new Error("Parsed data is not an array");
+                     const parsedData = JSON.parse(rawResponse);
+                     twinResults = Array.isArray(parsedData) ? parsedData : [parsedData];
                 }
             } catch (e) {
                 console.error(`${LOG_PREFIX} Failed to parse JSON from Twins' pre-screening response. Error: ${e.message}. Raw response:`, rawResponse);
@@ -484,6 +484,7 @@ Strictly adhere to the JSON format. Do not add any other text.`;
         const roleForGenUpper = gremlinRoleForGeneration.charAt(0).toUpperCase() + gremlinRoleForGeneration.slice(1);
         let addedCount = 0;
 
+        // Using a template literal (backticks) to prevent macro processing.
         const systemPrompt = `You are an expert literary editor and a master of Regex, tasked with elevating prose by eliminating repetitive phrasing ("slop"). Your goal is to generate high-quality, transformative alternatives for given text patterns.
 
 ## TASK
@@ -519,7 +520,7 @@ Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, an
     -   **Combine Variations**: If the pattern implies variations (e.g., \`graces/touches/crosses\`), use non-capturing groups or character classes like \`(?:graces?|touches|crosses)\`. For verb tenses, consider \`(?:looks?|gazed?|stared?)\`.
     -   **Precision**: Use word boundaries \`\\b\` to avoid matching parts of other words. Ensure the regex accurately targets the intended slop.
 3.  **replaceString**: A string containing **at least ${MIN_ALTERNATIVES_PER_RULE} high-quality, creative, and grammatically correct alternatives**.
-    -   **CRITICAL FORMAT**: The entire string MUST be in the exact format: \`{{random:alt1,alt2,alt3,...,altN}}\`.
+    -   **CRITICAL FORMAT**: The entire string MUST be in the exact format: \`{{random:alt1,alt2,alt3,...,altN}}\`. The examples below show this with spaces, like \`{ {random:...} }\`, to prevent system errors. Your output **MUST** be compact, with no spaces, like \`{{random:...}}\`.
     -   Alternatives MUST be separated by a **single comma (,)**. Do not use pipes (|) or any other separator.
     -   Do not add spaces around the commas unless those spaces are intentionally part of an alternative.
     -   **Placeholders**: Use \`$1\`, \`$2\`, etc., to re-insert captured groups from your regex. Ensure these fit grammatically into your alternatives.
@@ -537,7 +538,7 @@ Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, an
 {
   "scriptName": "Slopfix - Fleeting Doubt Expression",
   "findRegex": "\\\\b[aA]\\\\s+flicker\\\\s+of\\\\s+([a-zA-Z\\\\s]+?)\\\\s+(?:ignited|passed|cross|crossed|twisted)\\\\s+(?:in|across|through)\\\\s+([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+(?:eyes|face|mind|gut|depths)\\\\b",
-  "replaceString": "{{random:a fleeting look of $1 crossed $2 face,$2 eyes briefly clouded with $1,a momentary shadow of $1 touched $2 features,$2 expression betrayed a flash of $1,$1 briefly surfaced in $2 gaze}}"
+  "replaceString": "{ {random:a fleeting look of $1 crossed $2 face,$2 eyes briefly clouded with $1,a momentary shadow of $1 touched $2 features,$2 expression betrayed a flash of $1,$1 briefly surfaced in $2 gaze} }"
 }
 \`\`\`
 
@@ -546,13 +547,13 @@ Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, an
 {
   "scriptName": "Slopfix - Rapid Heartbeat",
   "findRegex": "\\\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+heart\\\\s+(?:pounded|hammered|thudded|fluttered|raced)(?:\\\\s+in\\\\s+\\\\1\\\\s+(?:chest|ribs))?\\\\b",
-  "replaceString": "{{random:a frantic rhythm drummed against $1 ribs,$1 pulse hammered at the base of their throat,$1 chest tightened with heavy thudding,a nervous tremor started beneath $1 breastbone,$1 heartbeat echoed in their ears like war drums}}"
+  "replaceString": "{ {random:a frantic rhythm drummed against $1 ribs,$1 pulse hammered at the base of their throat,$1 chest tightened with heavy thudding,a nervous tremor started beneath $1 breastbone,$1 heartbeat echoed in their ears like war drums} }"
 }
 \`\`\`
 *(Note: Ensure you generate at least ${MIN_ALTERNATIVES_PER_RULE} alternatives for each rule in your actual output, even if the examples above show fewer for brevity here.)*
 
 ## CORE PRINCIPLES
--   **High-Quality Alternatives & Strict Formatting are Paramount**: Prioritize generating genuinely transformative and well-written alternatives. If you cannot produce at least ${MIN_ALTERNATIVES_PER_RULE} such alternatives for a pattern, adhering STRICTLY to the specified comma-separated \`{{random:...}}\` format as shown in the examples, it is better to omit the rule entirely from your JSON output.
+-   **High-Quality Alternatives & Strict Formatting are Paramount**: Prioritize generating genuinely transformative and well-written alternatives. If you cannot produce at least ${MIN_ALTERNATIVES_PER_RULE} such alternatives for a pattern, adhering STRICTLY to the specified comma-separated \`{{random:...}}\` format (with no spaces), it is better to omit the rule entirely from your JSON output.
 -   **Reject Unsuitable Patterns**: If an input pattern is too generic (e.g., "he said that"), conversational, a common idiom that isn't "slop", or you cannot create ${MIN_ALTERNATIVES_PER_RULE}+ excellent alternatives in the **exact correct format**, **DO NOT** create a rule for it. Simply omit its object from the final JSON array.
 -   **Focus on Narrative Prose**: The rules are intended for descriptive and narrative text.
 -   **Final Output**: If you reject all candidates, your entire response must be an empty array: \`[]\`.
@@ -564,11 +565,15 @@ Your output will be parsed directly by \`JSON.parse()\`. It must be perfect.`;
         const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
 
         try {
-            this.toastr.info(`Prose Polisher: Configuring '${roleForGenUpper}' environment for rule generation...`, "Project Gremlin", { timeOut: 7000 });
-            if (!await applyGremlinEnvironment(gremlinRoleForGeneration)) {
-                throw new Error(`Failed to configure environment for rule generation using ${roleForGenUpper} Gremlin's settings.`);
+            if (gremlinRoleForGeneration !== 'current') {
+                this.toastr.info(`Prose Polisher: Configuring '${roleForGenUpper}' environment for rule generation...`, "Project Gremlin", { timeOut: 7000 });
+                if (!await applyGremlinEnvironment(gremlinRoleForGeneration)) {
+                    throw new Error(`Failed to configure environment for rule generation using ${roleForGenUpper} Gremlin's settings.`);
+                }
+                this.toastr.info(`Prose Polisher: Generating regex rules via AI (${roleForGenUpper})...`, "Project Gremlin", { timeOut: 25000 });
+            } else {
+                this.toastr.info(`Prose Polisher: Generating regex rules via AI (using current connection)...`, "Project Gremlin", { timeOut: 25000 });
             }
-            this.toastr.info(`Prose Polisher: Generating regex rules via AI (${roleForGenUpper})...`, "Project Gremlin", { timeOut: 25000 });
             const rawResponse = await executeGen(fullPrompt);
 
             if (!rawResponse || !rawResponse.trim()) {
@@ -581,10 +586,11 @@ Your output will be parsed directly by \`JSON.parse()\`. It must be perfect.`;
                 const jsonMatch = rawResponse.match(/```json\s*([\s\S]*?)\s*```|(\[[\s\S]*?\])/s);
                 if (jsonMatch) {
                     const jsonString = jsonMatch[1] || jsonMatch[2];
-                    newRules = JSON.parse(jsonString);
+                    const parsedData = JSON.parse(jsonString);
+                    newRules = Array.isArray(parsedData) ? parsedData : [parsedData];
                 } else {
-                     newRules = JSON.parse(rawResponse); 
-                     if (!Array.isArray(newRules)) throw new Error("Parsed data is not an array.");
+                     const parsedData = JSON.parse(rawResponse);
+                     newRules = Array.isArray(parsedData) ? parsedData : [parsedData];
                 }
             } catch (e) {
                 console.error(`${LOG_PREFIX} Failed to parse JSON from ${roleForGenUpper}'s response. Error: ${e.message}. Raw response:`, rawResponse);
@@ -596,11 +602,23 @@ Your output will be parsed directly by \`JSON.parse()\`. It must be perfect.`;
                 if (rule && rule.scriptName && rule.findRegex && rule.replaceString) {
                     try { new RegExp(rule.findRegex); } catch (e) { console.warn(`${LOG_PREFIX} AI generated an invalid regex for rule '${rule.scriptName}', skipping: ${e.message}`); continue; }
                     
-                    // Stricter parsing based on the new prompt guidelines
-                    const alternativesMatch = rule.replaceString.match(/^\{\{random:([\s\S]+?)\}\}$/);
                     let alternativesArray = [];
+                    let finalReplaceString = '';
+
+                    // Sanitize first to handle `{ {` cases
+                    let processedString = rule.replaceString.replace(/\{\s*\{/g, '{{').replace(/\}\s*\}/g, '}}').replace(/\{\{\s*random:/, '{{random:');
+
+                    const alternativesMatch = processedString.match(/^\{\{random:([\s\S]+?)\}\}$/);
+
                     if (alternativesMatch && alternativesMatch[1]) {
+                        // Case 1: The wrapper exists, parse from it.
                         alternativesArray = alternativesMatch[1].split(',').map(s => s.trim()).filter(s => s);
+                        finalReplaceString = processedString;
+                    } else {
+                        // Case 2: The wrapper is missing. Assume the whole string is the list.
+                        const rawAlternatives = processedString.replace(/^"|"$/g, '');
+                        alternativesArray = rawAlternatives.split(',').map(s => s.trim()).filter(s => s);
+                        finalReplaceString = `{{random:${alternativesArray.join(',')}}}`;
                     }
 
                     if (alternativesArray.length < MIN_ALTERNATIVES_PER_RULE) {
@@ -612,6 +630,7 @@ Your output will be parsed directly by \`JSON.parse()\`. It must be perfect.`;
                     rule.disabled = rule.disabled ?? false;
                     rule.isStatic = false;
                     rule.isNew = true;
+                    rule.replaceString = finalReplaceString; // Use the correctly formatted string
                     dynamicRulesRef.push(rule);
                     addedCount++;
                 }
@@ -684,10 +703,20 @@ Your output will be parsed directly by \`JSON.parse()\`. It must be perfect.`;
                     try { new RegExp(lastValidOutput.findRegex); }
                     catch (e) { console.warn(`${LOG_PREFIX} Iterative Twins produced invalid regex for '${lastValidOutput.scriptName}', skipping: ${e.message}`); continue; }
 
-                    const alternativesMatch = lastValidOutput.replaceString.match(/^\{\{random:([\s\S]+?)\}\}$/);
                     let alternativesArray = [];
+                    let finalReplaceString = '';
+
+                    // Sanitize first to handle `{ {` cases
+                    let processedString = lastValidOutput.replaceString.replace(/\{\s*\{/g, '{{').replace(/\}\s*\}/g, '}}').replace(/\{\{\s*random:/, '{{random:');
+                    const alternativesMatch = processedString.match(/^\{\{random:([\s\S]+?)\}\}$/);
+
                     if (alternativesMatch && alternativesMatch[1]) {
                         alternativesArray = alternativesMatch[1].split(',').map(s => s.trim()).filter(s => s);
+                        finalReplaceString = processedString;
+                    } else {
+                        const rawAlternatives = processedString.replace(/^"|"$/g, '');
+                        alternativesArray = rawAlternatives.split(',').map(s => s.trim()).filter(s => s);
+                        finalReplaceString = `{{random:${alternativesArray.join(',')}}}`;
                     }
 
                     if (alternativesArray.length < MIN_ALTERNATIVES_PER_RULE) {
@@ -699,7 +728,7 @@ Your output will be parsed directly by \`JSON.parse()\`. It must be perfect.`;
                         id: `DYN_TWIN_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
                         scriptName: lastValidOutput.scriptName,
                         findRegex: lastValidOutput.findRegex,
-                        replaceString: lastValidOutput.replaceString, // Should be correctly formatted by Vax
+                        replaceString: finalReplaceString,
                         disabled: false,
                         isStatic: false,
                         isNew: true,
@@ -800,7 +829,7 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
                 prompt += 'Output JSON with keys: "findRegex" (string, your refined version), "alternatives" (array of strings, your refined/expanded list), "notes_for_vex" (string, which is optional).\n';
             }
         }
-        prompt += "\nIMPORTANT: Output ONLY the JSON object. No other text or markdown.\nIf, on Vax's final turn, you determine this candidate cannot be made into a high-quality rule meeting all criteria (especially the ${MIN_ALTERNATIVES_PER_RULE} alternatives and the **exact** \`replaceString\` format), output an empty JSON object: `{}`.\n";
+        prompt += `\nIMPORTANT: Output ONLY the JSON object. No other text or markdown.\nIf, on Vaxs final turn, you determine this candidate cannot be made into a high-quality rule meeting all criteria (especially the ${MIN_ALTERNATIVES_PER_RULE} alternatives and the **exact** \`replaceString\` format), output an empty JSON object: {}.\n`;
         return prompt;
     }
 
@@ -811,35 +840,55 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
         
         this.performIntermediateAnalysis();
         
-        const getOriginalFromKey = (lemmatizedKey) => {
-            if (!lemmatizedKey) return lemmatizedKey; 
-            if (lemmatizedKey.includes('/')) return lemmatizedKey; 
-            const data = this.ngramFrequencies.get(lemmatizedKey);
-            return data ? data.original : lemmatizedKey; 
-        };
+        // --- START: REVISED CANDIDATE GATHERING LOGIC ---
+        const candidatesForAi = [];
+        const contextMap = new Map();
+        for (const data of this.ngramFrequencies.values()) {
+            contextMap.set(data.original, data.contextSentence);
+        }
 
-        const patternCandidates = this.analyzedLeaderboardData.merged.map(entry => entry[0]); 
-        const individualCandidatesOriginal = this.analyzedLeaderboardData.remaining.map(entry => entry[0]);
-        const slopCandidatesOriginal = Array.from(this.slopCandidates).map(getOriginalFromKey);
+        // 1. Process merged patterns
+        for (const [pattern, score] of Object.entries(this.analyzedLeaderboardData.merged)) {
+            candidatesForAi.push({
+                candidate: pattern,
+                enhanced_context: pattern, // For patterns, the pattern itself is the best context
+                score: score,
+            });
+        }
 
+        // 2. Process remaining individual phrases
+        for (const [phrase, score] of Object.entries(this.analyzedLeaderboardData.remaining)) {
+            candidatesForAi.push({
+                candidate: phrase,
+                enhanced_context: contextMap.get(phrase) || phrase, // Use real sentence context
+                score: score,
+            });
+        }
 
-        const allPotentialCandidates = [...new Set([...slopCandidatesOriginal, ...patternCandidates, ...individualCandidatesOriginal])];
+        // 3. Sort all candidates together by score
+        candidatesForAi.sort((a, b) => b.score - a.score);
         
-        if (allPotentialCandidates.length === 0) {
+        if (candidatesForAi.length === 0) {
              this.toastr.info("Prose Polisher: No slop candidates or patterns identified. Run analysis or wait for more messages.");
              return;
         }
+        // --- END: REVISED CANDIDATE GATHERING LOGIC ---
 
-        const candidatesForTwinsPreScreen = allPotentialCandidates.slice(0, TWINS_PRESCREEN_BATCH_SIZE);
+        const candidatesForPreScreening = candidatesForAi.slice(0, TWINS_PRESCREEN_BATCH_SIZE);
         let validCandidatesForGeneration = [];
-        if (candidatesForTwinsPreScreen.length > 0) {
-            validCandidatesForGeneration = await this.callTwinsForSlopPreScreening(candidatesForTwinsPreScreen);
+        
+        if (this.settings.skipTriageCheck) {
+            console.log(`${LOG_PREFIX} [Manual Gen] Skip Triage is enabled. Using direct candidates.`);
+            validCandidatesForGeneration = candidatesForPreScreening;
+        } else {
+            const rawCandidatesForTwins = candidatesForPreScreening.map(c => c.candidate);
+            validCandidatesForGeneration = await this.callTwinsForSlopPreScreening(rawCandidatesForTwins);
         }
 
         const batchToProcess = validCandidatesForGeneration.slice(0, BATCH_SIZE);
 
         if (batchToProcess.length === 0) {
-            this.toastr.info("Prose Polisher: Twins' pre-screening found no valid slop candidates for rule generation.");
+            this.toastr.info("Prose Polisher: AI pre-screening found no valid slop candidates for rule generation.");
             return;
         }
         
@@ -847,13 +896,19 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
         let newRulesCount = 0;
 
         try {
+            // *** FIX: Correctly route the generation method ***
             if (this.settings.regexGenerationMethod === 'twins') {
                 newRulesCount = await this.generateRulesIterativelyWithTwins(batchToProcess, dynamicRulesRef, this.settings.regexTwinsCycles);
-            } else { 
+            } 
+            else if (this.settings.regexGenerationMethod === 'single') {
                 const gremlinRoleForRegexGen = this.settings.regexGeneratorRole || 'writer';
                 const roleForGenUpper = gremlinRoleForRegexGen.charAt(0).toUpperCase() + gremlinRoleForRegexGen.slice(1);
-                this.toastr.info(`Prose Polisher: Starting AI rule generation for ${batchToProcess.length} pre-screened candidates (using ${roleForGenUpper} settings)...`);
+                this.toastr.info(`Prose Polisher: Starting AI rule generation for ${batchToProcess.length} candidates (using ${roleForGenUpper} settings)...`);
                 newRulesCount = await this.generateAndSaveDynamicRulesWithSingleGremlin(batchToProcess, dynamicRulesRef, gremlinRoleForRegexGen);
+            }
+            else { // This now correctly handles 'current'
+                this.toastr.info(`Prose Polisher: Starting AI rule generation for ${batchToProcess.length} candidates (using current connection)...`);
+                newRulesCount = await this.generateAndSaveDynamicRulesWithSingleGremlin(batchToProcess, dynamicRulesRef, 'current');
             }
         } catch (error) {
             console.error(`${LOG_PREFIX} Top-level error during rule generation:`, error);
@@ -889,17 +944,13 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
         
         this.performIntermediateAnalysis(); 
         
-        const currentSlopOriginalsAfterProcessing = Array.from(this.slopCandidates).map(getOriginalFromKey);
-        const currentPatternCandidatesAfterProcessing = this.analyzedLeaderboardData.merged.map(entry => entry[0]);
-        const currentIndividualCandidatesOriginalAfterProcessing = this.analyzedLeaderboardData.remaining.map(entry => entry[0]);
-        const totalRemainingUnique = new Set([...currentSlopOriginalsAfterProcessing, ...currentPatternCandidatesAfterProcessing, ...currentIndividualCandidatesOriginalAfterProcessing]).size;
+        const remainingCandidateCount = Object.keys(this.analyzedLeaderboardData.merged).length + Object.keys(this.analyzedLeaderboardData.remaining).length;
 
-
-        if (totalRemainingUnique > 0) {
-            this.toastr.info(`Prose Polisher: Approx ${totalRemainingUnique} more unique candidates/patterns remaining. Click "Generate AI Rules" again to process the next batch.`);
+        if (remainingCandidateCount > 0) {
+            this.toastr.info(`Prose Polisher: Approx ${remainingCandidateCount} more unique candidates/patterns remaining. Click "Generate AI Rules" again to process the next batch.`);
         } else if (newRulesCount === 0 && batchToProcess.length > 0) { 
              this.toastr.info("Prose Polisher: All identified slop candidates and patterns have been processed or filtered by the AI.");
-        } else if (newRulesCount > 0 && totalRemainingUnique === 0) { 
+        } else if (newRulesCount > 0 && remainingCandidateCount === 0) { 
              this.toastr.info("Prose Polisher: All identified slop candidates and patterns have been processed.");
         }
     }

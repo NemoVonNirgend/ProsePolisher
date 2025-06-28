@@ -1,7 +1,7 @@
 {
     "display_name": "Prose Polisher (Regex + AI)",
-    "author": "@NemoVonNirgend",
-    "version": "5.3.1",
+    "author": "@NemoVonNirgend & AI Collaboration",
+    "version": "5.3.3",
     "description": "A comprehensive tool to enhance AI writing quality by fixing echoes and repetitive phrases ('slop'), featuring the advanced Project Gremlin pipeline.",
     "requires": [],
     "optional": [],

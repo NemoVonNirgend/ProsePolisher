@@ -15,9 +15,10 @@ function stripMarkup(text) {
     cleanText = cleanText.replace(/<(info_panel|memo|code|pre|script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
     cleanText = cleanText.replace(/<[^>]*>/g, ' ');
     cleanText = cleanText.replace(/(?:\*|_|~|`)+(.+?)(?:\*|_|~|`)+/g, '$1');
-    cleanText = cleanText.replace(/"(.*?)"/g, '$1');
-    cleanText = cleanText.replace(/\((.*?)\)/g, '$1');
-    cleanText = cleanText.replace(/^[\s*]+|[\s*]+$/g, '').trim();
+    cleanText = cleanText.replace(/"(.*?)"/g, ' $1 ');
+    cleanText = cleanText.replace(/\((.*?)\)/g, ' $1 ');
+    cleanText = cleanText.replace(/\s+/g, ' ').trim();
+
     return cleanText;
 }
 
@@ -66,7 +67,7 @@ class AnalyzerWorker {
 
         this.ngramFrequencies = new Map();
         this.slopCandidates = new Set();
-        this.analyzedLeaderboardData = { merged: [], remaining: [] };
+        this.analyzedLeaderboardData = { merged: {}, remaining: {} };
         this.totalAiMessagesProcessed = 0;
 
         this.effectiveWhitelist = new Set();
@@ -93,11 +94,10 @@ class AnalyzerWorker {
         const blacklist = this.settings.blacklist || {};
         if (Object.keys(blacklist).length === 0) return 0;
         const lowerCasePhrase = phrase.toLowerCase();
-        const words = lowerCasePhrase.split(/\s+/).filter(w => w);
         let maxWeight = 0;
-        for (const word of words) {
-            if (blacklist[word]) {
-                maxWeight = Math.max(maxWeight, blacklist[word]);
+        for (const blacklistedTerm in blacklist) {
+            if (lowerCasePhrase.includes(blacklistedTerm)) {
+                maxWeight = Math.max(maxWeight, blacklist[blacklistedTerm]);
             }
         }
         return maxWeight;
@@ -120,23 +120,15 @@ class AnalyzerWorker {
         const NGRAM_MAX = this.settings.ngramMax || 10;
         const SLOP_THRESHOLD = this.settings.slopThreshold || 3.0;
 
-        const chunks = [];
-        let lastIndex = 0;
-        cleanText.replace(/(["'])(?:(?=(\\?))\2.)*?\1/g, (match, quote, offset) => {
-            if (offset > lastIndex) {
-                chunks.push({ content: cleanText.substring(lastIndex, offset), type: 'narration' });
-            }
-            chunks.push({ content: match, type: 'dialogue' });
-            lastIndex = offset + match.length;
-        });
-        if (lastIndex < cleanText.length) {
-            chunks.push({ content: cleanText.substring(lastIndex), type: 'narration' });
-        }
+        const sentences = cleanText.match(/[^.!?]+[.!?]+["]?/g) || [cleanText];
 
-        for (const chunk of chunks) {
-            if (!chunk.content.trim()) continue;
+        for (const sentence of sentences) {
+            if (!sentence.trim()) continue;
 
-            const originalWords = chunk.content.replace(/[.,!?]/g, '').toLowerCase().split(/\s+/).filter(Boolean);
+            const isDialogue = /["']/.test(sentence.trim().substring(0, 10));
+            const chunkType = isDialogue ? 'dialogue' : 'narration';
+
+            const originalWords = sentence.replace(/[.,!?]/g, '').toLowerCase().split(/\s+/).filter(Boolean);
             const lemmatizedWords = originalWords.map(word => lemmaMap.get(word) || word);
 
             for (let n = NGRAM_MIN; n <= NGRAM_MAX; n++) {
@@ -161,7 +153,7 @@ class AnalyzerWorker {
                     const uncommonWordCount = originalNgram.split(' ').reduce((count, word) => count + (this.effectiveWhitelist.has(word) ? 0 : 1), 0);
                     scoreIncrement += uncommonWordCount * 0.5;
                     scoreIncrement += this.getBlacklistWeight(originalNgram);
-                    if (chunk.type === 'narration') {
+                    if (chunkType === 'narration') {
                         scoreIncrement *= 1.25;
                     }
 
@@ -222,7 +214,7 @@ class AnalyzerWorker {
     pruneDuringManualAnalysis() {
         let prunedCount = 0;
         for (const [ngram, data] of this.ngramFrequencies.entries()) {
-            if (data.score <= 1 && data.count < 2) { 
+            if (data.score < 2 && data.count < 2) { 
                 this.ngramFrequencies.delete(ngram);
                 this.slopCandidates.delete(ngram);
                 prunedCount++;
@@ -345,8 +337,8 @@ class AnalyzerWorker {
         const allRemainingEntries = Object.entries(remaining).sort((a, b) => b[1] - a[1]);
         
         this.analyzedLeaderboardData = {
-            merged: mergedEntries,
-            remaining: allRemainingEntries,
+            merged: Object.fromEntries(mergedEntries),
+            remaining: Object.fromEntries(allRemainingEntries),
         };
     }
 
@@ -389,20 +381,13 @@ class AnalyzerWorker {
         this.performIntermediateAnalysis();
         this.pruneOldNgrams(); // Final prune
 
-        const getOriginalFromKey = (lemmatizedKey) => {
-            if (!lemmatizedKey) return lemmatizedKey; 
-            if (lemmatizedKey.includes('/')) return lemmatizedKey; 
-            const data = this.ngramFrequencies.get(lemmatizedKey);
-            return data ? data.original : lemmatizedKey; 
-        };
-
-        const slopCandidatesOriginal = Array.from(this.slopCandidates).map(getOriginalFromKey);
+        const slopCandidatesLemmatized = Array.from(this.slopCandidates);
 
         console.log(`[ProsePolisher:AnalyzerWorker] Sending complete message. aiMessagesAnalyzed: ${aiMessagesAnalyzed}`);
         postMessage({
             type: 'complete',
             analyzedLeaderboardData: this.analyzedLeaderboardData,
-            slopCandidates: slopCandidatesOriginal,
+            slopCandidates: slopCandidatesLemmatized,
             ngramFrequencies: this.ngramFrequencies, // Send the full frequency map back
             aiMessagesAnalyzed: aiMessagesAnalyzed
         });
@@ -412,14 +397,19 @@ class AnalyzerWorker {
 let analyzerWorkerInstance = null;
 
 onmessage = async function(e) {
-    const { type, chatMessages, settings, compiledRegexSources } = e.data;
+    try {
+        const { type, chatMessages, settings, compiledRegexSources } = e.data;
 
-    if (type === 'startAnalysis') {
-        if (!analyzerWorkerInstance) {
-            // Pass the serializable regex sources to the constructor
-            analyzerWorkerInstance = new AnalyzerWorker(settings, compiledRegexSources);
+        if (type === 'startAnalysis') {
+            if (!analyzerWorkerInstance) {
+                // Pass the serializable regex sources to the constructor
+                analyzerWorkerInstance = new AnalyzerWorker(settings, compiledRegexSources);
+            }
+            // processChatHistory no longer needs the regexes passed directly
+            await analyzerWorkerInstance.processChatHistory(chatMessages, settings);
         }
-        // processChatHistory no longer needs the regexes passed directly
-        await analyzerWorkerInstance.processChatHistory(chatMessages, settings);
+    } catch (error) {
+        console.error("[ProsePolisher:AnalyzerWorker] Uncaught error in worker onmessage:", error);
+        throw error; // Re-throw to ensure the main thread's onerror handler is triggered.
     }
 };

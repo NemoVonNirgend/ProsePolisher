@@ -312,6 +312,10 @@ export async function runGremlinPlanningPipeline() {
     console.log('[ProjectGremlin] The Gremlin planning process is starting...');
     const settings = extension_settings.ProsePolisher;
 
+    if (!settings.projectGremlinEnabled) {
+        return;
+    }
+
     // --- 1. Papa Gremlin (The Architect) ---
     const papaInstructionSetting = settings.gremlinPapaInstructions;
     let blueprintInstruction = (papaInstructionSetting && papaInstructionSetting.trim() !== '') ? papaInstructionSetting : DEFAULT_PAPA_INSTRUCTIONS;
