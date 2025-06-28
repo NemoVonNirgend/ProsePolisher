@@ -1044,11 +1044,14 @@ async function triggerDynamicRuleGenerationIfNeeded() {
             if (settings.regexGenerationMethod === 'twins') {
                 window.toastr.info(`${toastMsgBase} Iterative Twins rule generation ${toastMsgDetails}`, "Project Gremlin");
                 newRulesCount = await prosePolisherAnalyzer.generateRulesIterativelyWithTwins(batchToProcess, dynamicRules, settings.regexTwinsCycles);
-            } else {
+            } else if (settings.regexGenerationMethod === 'single') {
                 const gremlinRoleForRegexGen = settings.regexGeneratorRole || 'writer';
                 const roleForGenUpper = gremlinRoleForRegexGen.charAt(0).toUpperCase() + gremlinRoleForRegexGen.slice(1);
                 window.toastr.info(`${toastMsgBase} Single Gremlin (${roleForGenUpper}) rule generation ${toastMsgDetails}`, "Project Gremlin");
                 newRulesCount = await prosePolisherAnalyzer.generateAndSaveDynamicRulesWithSingleGremlin(batchToProcess, dynamicRules, gremlinRoleForRegexGen);
+            } else { // 'current'
+                window.toastr.info(`${toastMsgBase} rule generation ${toastMsgDetails} (using current connection)`);
+                newRulesCount = await prosePolisherAnalyzer.generateAndSaveDynamicRulesWithSingleGremlin(batchToProcess, dynamicRules, 'current');
             }
         } catch (error) {
             console.error(`${LOG_PREFIX} Error during auto-triggered rule generation:`, error);
