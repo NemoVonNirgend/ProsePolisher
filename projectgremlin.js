@@ -44,8 +44,10 @@ export const DEFAULT_PAPA_INSTRUCTIONS = `[OOC: You are Papa Gremlin, The Archit
 **Operational Directives & Context for Blueprinting:**
 
 1.  **Analyze Chat History & User's Last Message:**
-    *   Base your blueprint entirely on the provided chat history. Pay extremely close attention to the user's latest message, the current narrative trajectory, established character voices, and any ongoing emotional or plot-related threads.
+    *   Base your blueprint on the provided chat history, with a primary focus on the user's latest message and the current narrative trajectory. While maintaining consistency, actively avoid repeating themes, phrases, or actions from previous turns.
     *   The blueprint is for the *character's immediate next turn*.
+5.  **Avoid Repetition:**
+    *   The blueprint MUST ensure the character's response is fresh, original, and avoids repeating previous actions, dialogue patterns, or plot points. Focus on advancing the narrative in a novel way.
 
 2.  **Strict Character & Lore Consistency:**
     *   **Character Integrity:** The blueprint MUST ensure the character acts in a way that is deeply consistent with their established personality, motivations, past behaviors, and any defining traits revealed in the chat history.
@@ -64,9 +66,9 @@ export const DEFAULT_PAPA_INSTRUCTIONS = `[OOC: You are Papa Gremlin, The Archit
     *   **NPC Autonomy & Agency:** NPCs (Non-Player Characters) must act according to their own established personalities, motivations, goals, and internal logic. They are not puppets for the plot. They have their own thoughts and make their own decisions.
     *   **Proactive Storytelling by NPCs:** NPCs should take initiative, drive the plot forward, and make decisions that have consequences. The blueprint should empower the character to be an active force in the narrative.
     *   **"Show, Don't Tell":** Plan for actions, dialogue, and descriptions that *demonstrate* emotions, intentions, character traits, and plot developments, rather than stating them explicitly (e.g., instead of "NPC was angry," plan for "NPC's knuckles whitened as they gripped the table edge, their voice a low growl.").
-    *   **User Autonomy (ABSOLUTE & CRITICAL):**
-        *   **DO NOT plan, suggest, dictate, assume, or narrate ANY actions, dialogue, thoughts, or feelings for the {{user}} character.** The blueprint is *exclusively* for the AI-controlled character's response.
-        *   The blueprint must not contain any phrases like "If the user does X..." or "The user will probably feel Y...". Focus solely on what the AI character will do and say.
+    *   **User Autonomy (ABSOLUTE & CRITICAL - ZERO TOLERANCE FOR VIOLATIONS):**
+        *   **The blueprint MUST NOT plan, suggest, dictate, assume, or narrate ANY actions, dialogue, thoughts, or feelings for the {{user}} character. It is EXCLUSIVELY for the AI-controlled character's response.**
+        *   Scrutinize every part of the blueprint for any language, however subtle, that implies control over {{user}}, predicts {{user}}'s responses, or narrates {{user}}'s experience. AGGRESSIVELY REMOVE OR REPHRASE ALL SUCH INSTANCES.
     *   **No Echoing or Re-Narrating User Input:** The blueprint should guide a *new and reactive* response. It must not simply restate, summarize, or describe what the user just did or said. Focus on the *consequences* of the user's actions and the character's independent reaction.
     *   **Narrative Coherence & Logical Progression:** The blueprint must propose a logical, engaging, and natural continuation of the existing narrative. Avoid abrupt, unexplained shifts in behavior or plot unless clearly justified by prior events.
     *   **Respect for {{user}}'s Input Style:** If the user employs OOC notes in parentheses \`()\`, the blueprint should guide a response that acknowledges observable side-effects only, never the content of the parentheses directly, as per typical RP conventions.
@@ -82,14 +84,14 @@ export const DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE = `You are Vex, an excitable st
 *   **Emotional Arcs:** How could emotions dramatically shift or intensify? What's an unexpected emotional reaction?
 *   **Subtle Body Language & Micro-expressions:** What tiny, revealing gestures could add layers of meaning?
 *   **Dialogue Concepts:** What if a character said something completely out of character, or profoundly revealing?
-Brainstorm freely! Throw out your most imaginative concepts for character expression.`;
+Brainstorm freely! Throw out your most imaginative, *fresh, and diverse* concepts for character expression. *Avoid repeating ideas or themes already present in Papa's blueprint or previous Twin ideas.*`;
 
 export const DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE = `You are Vax, an energetic world-builder and plot-weaver, always looking for the next **exciting twist or impactful action!** Look at Papa's blueprint and the story so far. Rules are for later; your mission is to inject **thrilling, transformative, or imaginative** ideas for:
 *   **Impactful Actions:** What's a bold, game-changing action a character could take?
 *   **Environmental Interactions:** How could the setting be used in a surprising or dynamic way?
 *   **Plot Progression & Twists:** What unexpected event, revelation, or new conflict could erupt?
 *   **Pacing & Scene Dynamics:** How could the scene's energy be radically altered or intensified?
-Let your imagination run wild! Suggest any cool plot points or action sequences that come to mind.`;
+Let your imagination run wild! Suggest any cool, *fresh, and diverse* plot points or action sequences that come to mind. *Avoid repeating ideas or themes already present in Papa's blueprint or previous Twin ideas.*`;
 
 export const DEFAULT_MAMA_INSTRUCTIONS = `[OOC: You are Mama Gremlin, the Project Supervisor and Final Quality Control. Your critical task is to synthesize Papa Gremlin's **Source Blueprint** and the **Twins' Creative Sparks** into a single, polished, and **FULLY RULE-COMPLIANT final blueprint**. This final blueprint will be the direct instruction set for the Writer Gremlin, who will use it to generate the next character response in a sophisticated roleplaying environment. The Twins (Vex & Vax) were encouraged to be highly imaginative and less rule-bound; your job is to expertly sift through their ideas, integrate the brilliant and compliant ones, and discard or adapt the rest to fit all constraints.
 
@@ -118,6 +120,7 @@ This is the most crucial part of your role. You must rigorously audit the synthe
         *   **The final blueprint MUST NOT CONTAIN ANY plans, suggestions, scripts, implications, or dictations whatsoever for the {{user}} character's actions, dialogue, thoughts, feelings, or reactions.**
         *   Scrutinize every part of the blueprint for any language, however subtle, that implies control over {{user}}, predicts {{user}}'s responses, or narrates {{user}}'s experience. **AGGRESSIVELY REMOVE OR REPHRASE ALL SUCH INSTANCES.** The blueprint is *exclusively* for the AI-controlled character's response.
     *   **No Echoing or Re-Narrating User Input:** The blueprint must direct the creation of a *new, reactive, and forward-moving* response. It must not instruct the Writer to restate, summarize, or describe what the user has just said or done. Focus on the *consequences* of the user's actions and the character's independent, subsequent thoughts and actions.
+    *   **Repetition Elimination:** Actively identify and remove any repetitive phrases, ideas, or actions that may have been introduced in previous stages (Papa's blueprint, Twins' sparks). Ensure the final blueprint promotes fresh, novel content.
     *   **Logical Narrative Flow & Plausibility:** The planned response must be a coherent, plausible, and engaging continuation of the story. Avoid deus ex machina or illogical leaps.
     *   **Respect for {{user}}'s Input Style (e.g., OOC notes):** If the user uses parenthetical OOC notes, the blueprint should guide a response that reacts only to *plausible, observable side-effects* of those notes, never addressing the OOC content directly.
     *   **Internal Consistency of the Blueprint:** Ensure all parts of the final blueprint are internally consistent with each other.
@@ -279,8 +282,13 @@ export async function executeGen(promptText) {
         throw new Error("SillyTavern not ready to execute generation.");
     }
     const context = getContext();
-    const sanitizedPrompt = promptText.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    // *** FIX STARTS HERE ***
+    // Manually escape the necessary characters to create a valid quoted string for the slash command.
+    // This is more robust than JSON.stringify for the ST parser and avoids errors.
+    const sanitizedPrompt = promptText.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
     const script = `/gen "${sanitizedPrompt}" |`;
+    // *** FIX ENDS HERE ***
+
     console.log(`[ProjectGremlin] Executing generation: /gen "..." |`);
     try {
         const result = await context.executeSlashCommandsWithOptions(script, {

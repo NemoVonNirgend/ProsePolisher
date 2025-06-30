@@ -1154,8 +1154,16 @@ async function onUserMessageRenderedForGremlin(messageId) {
         }
 
         window.toastr.success("Gremlin Pipeline: Blueprint complete! Prompt instruction prepared.", "Project Gremlin");
-        const sanitizedInstruction = finalInjectedInstruction.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        await context.executeSlashCommands(`/inject id=gremlin_final_plan position=chat depth=0 "${sanitizedInstruction}"`);
+        
+        // *** FIX & ENHANCEMENT STARTS HERE ***
+        const adherenceInstruction = "[System: Adhere to the detailed blueprint provided in the following instruction.]";
+        const sanitizedAdherence = adherenceInstruction.replace(/"/g, '\\"');
+        const sanitizedBlueprint = finalInjectedInstruction.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+
+        const finalScript = `/inject id=gremlin_adherence_prompt position=chat depth=0 "${sanitizedAdherence}" | /inject id=gremlin_final_plan position=chat depth=2 "${sanitizedBlueprint}"`;
+
+        await context.executeSlashCommands(finalScript);
+        // *** FIX & ENHANCEMENT ENDS HERE ***
 
     } catch (error) {
         console.error('[ProjectGremlin] A critical error occurred during the pipeline execution:', error);
@@ -1520,7 +1528,7 @@ async function initializeExtensionCore() {
 
             if (!settings.projectGremlinEnabled) {
                 const context = getContext();
-                context.executeSlashCommands('/inject id=gremlin_final_plan remove');
+                context.executeSlashCommands('/inject id=gremlin_final_plan remove | /inject id=gremlin_adherence_prompt remove');
             }
         };
         gremlinToggle?.addEventListener('pointerup', toggleGremlin);
@@ -1532,7 +1540,7 @@ async function initializeExtensionCore() {
                  updateGremlinSettingsVisibility(); // Ensure visibility updates on direct checkbox change
                  if (!settings.projectGremlinEnabled) {
                     const context = getContext();
-                    context.executeSlashCommands('/inject id=gremlin_final_plan remove');
+                    context.executeSlashCommands('/inject id=gremlin_final_plan remove | /inject id=gremlin_adherence_prompt remove');
                 }
             }
         });

@@ -1,6 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import { applyGremlinEnvironment, executeGen } from './projectgremlin.js'; // Ensure these are correctly imported
+import { prompts } from './prompts.js'; // <-- IMPORT THE NEW PROMPTS FILE
 
 // Import all new and existing data files
 import { commonWords } from './common_words.js';
@@ -374,56 +375,8 @@ export class Analyzer {
     async callTwinsForSlopPreScreening(rawCandidates, compiledRegexes) {
         if (!rawCandidates || rawCandidates.length === 0) return [];
 
-        const systemPrompt = `You are an expert natural language processing (NLP) analyst and a discerning literary critic. Your task is to evaluate a list of potential "slop" phrases or patterns identified by an automated system. For each candidate, you must determine if it is:
-1.  A coherent, grammatically sensible phrase/pattern.
-2.  Something that can plausibly be fixed or enhanced with alternative phrasing.
-3.  Not a random fragment, a character name, or a piece of code/metadata.
-
-For each *valid* candidate, you will provide an "enhanced context" - a representative full sentence (or a couple of sentences) where this phrase or a similar one might occur naturally in a story, incorporating it smoothly. This helps a later system understand how to generate alternatives.
-
-For each *invalid* candidate, you will briefly explain why it's invalid.
-
-Output a JSON array of objects. Each object must have:
-- \`candidate\`: The original phrase/pattern you are evaluating.
-- \`valid_for_regex\`: A boolean (true/false).
-- If \`valid_for_regex\` is \`true\`:
-    - \`enhanced_context\`: A string, representing a full sentence or two where the \`candidate\` would naturally fit. Ensure this context feels organic and helpful.
-- If \`valid_for_regex\` is \`false\`:
-    - \`reason\`: A brief string explaining why it's not valid (e.g., "Too short", "Nonsensical fragment", "Metadata").
-
-Example input:
-- "a flicker of doubt crossed his face"
-- "he looked at her"
-- "the"
-- "Status: Composed"
-
-Example output:
-\`\`\`json
-[
-  {
-    "candidate": "a flicker of doubt crossed his face",
-    "valid_for_regex": true,
-    "enhanced_context": "When she revealed her true intentions, a flicker of doubt crossed his face, a momentary crack in his usually stoic demeanor."
-  },
-  {
-    "candidate": "he looked at her",
-    "valid_for_regex": true,
-    "enhanced_context": "He looked at her across the crowded room, a silent question passing between their gazes."
-  },
-  {
-    "candidate": "the",
-    "valid_for_regex": false,
-    "reason": "Too short and generic to be a slop candidate for regex."
-  },
-  {
-    "candidate": "Status: Composed",
-    "valid_for_regex": false,
-    "reason": "Likely metadata or a list item, not natural prose."
-  }
-]
-\`\`\`
-Strictly adhere to the JSON format. Do not add any other text.`;
-
+        // The large prompt is now imported and used directly
+        const systemPrompt = prompts.callTwinsForSlopPreScreening;
         const userPrompt = `Evaluate the following potential slop phrases/patterns:\n- ${rawCandidates.join('\n- ')}\n\nProvide the JSON array of evaluations now.`;
 
         try {
@@ -484,81 +437,10 @@ Strictly adhere to the JSON format. Do not add any other text.`;
         const roleForGenUpper = gremlinRoleForGeneration.charAt(0).toUpperCase() + gremlinRoleForGeneration.slice(1);
         let addedCount = 0;
 
-        // Using a template literal (backticks) to prevent macro processing.
-        const systemPrompt = `You are an expert literary editor and a master of Regex, tasked with elevating prose by eliminating repetitive phrasing ("slop"). Your goal is to generate high-quality, transformative alternatives for given text patterns.
-
-## TASK
-Analyze the provided list of repetitive phrases/patterns. For each viable pattern, generate a corresponding JSON object for a find-and-replace rule. The input will provide the candidate phrase and an 'enhanced_context' which is a representative sentence where the phrase might occur. Use this context to understand the phrase's typical usage and implied writing style.
-
-## INPUT FORMAT
-The input is a list of objects, each with:
-- \`candidate\`: The repetitive phrase or pattern.
-- \`enhanced_context\`: A sentence or two showing the candidate in a typical usage.
-
-Example input to you:
-\`\`\`json
-[
-  {
-    "candidate": "a flicker of doubt crossed his face",
-    "enhanced_context": "When she revealed her true intentions, a flicker of doubt crossed his face, a momentary crack in his usually stoic demeanor."
-  },
-  {
-    "candidate": "her heart pounded in her chest",
-    "enhanced_context": "As the footsteps drew closer, her heart pounded in her chest, a frantic drum against her ribs."
-  }
-]
-\`\`\`
-
-## OUTPUT SPECIFICATION
-Your entire response MUST be a single, raw, valid JSON array \`[...] \`. Do not wrap it in markdown fences or add any commentary.
-
-Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, and \`replaceString\`.
-
-1.  **scriptName**: A concise, descriptive name for the rule (e.g., "Slopfix - Fleeting Doubt Expression", "Slopfix - Rapid Heartbeat").
-2.  **findRegex**: A valid JavaScript-compatible regex string.
-    -   **Generalize Intelligently**: Capture variable parts like pronouns \`([Hh]is|[Hh]er|[Tt]heir)\`, names, or specific objects with capture groups \`()\`. Example: For "a flicker of X crossed his face", capture "X" and "his".
-    -   **Combine Variations**: If the pattern implies variations (e.g., \`graces/touches/crosses\`), use non-capturing groups or character classes like \`(?:graces?|touches|crosses)\`. For verb tenses, consider \`(?:looks?|gazed?|stared?)\`.
-    -   **Precision**: Use word boundaries \`\\b\` to avoid matching parts of other words. Ensure the regex accurately targets the intended slop.
-3.  **replaceString**: A string containing **at least ${MIN_ALTERNATIVES_PER_RULE} high-quality, creative, and grammatically correct alternatives**.
-    -   **CRITICAL FORMAT**: The entire string MUST be in the exact format: \`{{random:alt1,alt2,alt3,...,altN}}\`. The examples below show this with spaces, like \`{ {random:...} }\`, to prevent system errors. Your output **MUST** be compact, with no spaces, like \`{{random:...}}\`.
-    -   Alternatives MUST be separated by a **single comma (,)**. Do not use pipes (|) or any other separator.
-    -   Do not add spaces around the commas unless those spaces are intentionally part of an alternative.
-    -   **Placeholders**: Use \`$1\`, \`$2\`, etc., to re-insert captured groups from your regex. Ensure these fit grammatically into your alternatives.
-    -   **Transformative Quality**:
-        -   **Avoid Superficial Changes**: Alternatives must be genuinely different.
-        -   **Evocative & Engaging**: Aim for vivid, impactful, and fresh phrasing.
-        -   **Maintain Grammatical Structure**: Alternatives, when placeholders are filled, must fit seamlessly.
-        -   **Infer Style**: Match the tone and style implied by the 'enhanced_context'.
-        -   **Literary Merit**: Each alternative should be of high literary quality.
-
-## FULL OUTPUT EXAMPLES (ASSUMING MIN_ALTERNATIVES_PER_RULE IS 5):
-
-**Example 1 (Based on "a flicker of doubt crossed his face"):**
-\`\`\`json
-{
-  "scriptName": "Slopfix - Fleeting Doubt Expression",
-  "findRegex": "\\\\b[aA]\\\\s+flicker\\\\s+of\\\\s+([a-zA-Z\\\\s]+?)\\\\s+(?:ignited|passed|cross|crossed|twisted)\\\\s+(?:in|across|through)\\\\s+([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+(?:eyes|face|mind|gut|depths)\\\\b",
-  "replaceString": "{ {random:a fleeting look of $1 crossed $2 face,$2 eyes briefly clouded with $1,a momentary shadow of $1 touched $2 features,$2 expression betrayed a flash of $1,$1 briefly surfaced in $2 gaze} }"
-}
-\`\`\`
-
-**Example 2 (Based on "her heart pounded in her chest"):**
-\`\`\`json
-{
-  "scriptName": "Slopfix - Rapid Heartbeat",
-  "findRegex": "\\\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+heart\\\\s+(?:pounded|hammered|thudded|fluttered|raced)(?:\\\\s+in\\\\s+\\\\1\\\\s+(?:chest|ribs))?\\\\b",
-  "replaceString": "{ {random:a frantic rhythm drummed against $1 ribs,$1 pulse hammered at the base of their throat,$1 chest tightened with heavy thudding,a nervous tremor started beneath $1 breastbone,$1 heartbeat echoed in their ears like war drums} }"
-}
-\`\`\`
-*(Note: Ensure you generate at least ${MIN_ALTERNATIVES_PER_RULE} alternatives for each rule in your actual output, even if the examples above show fewer for brevity here.)*
-
-## CORE PRINCIPLES
--   **High-Quality Alternatives & Strict Formatting are Paramount**: Prioritize generating genuinely transformative and well-written alternatives. If you cannot produce at least ${MIN_ALTERNATIVES_PER_RULE} such alternatives for a pattern, adhering STRICTLY to the specified comma-separated \`{{random:...}}\` format (with no spaces), it is better to omit the rule entirely from your JSON output.
--   **Reject Unsuitable Patterns**: If an input pattern is too generic (e.g., "he said that"), conversational, a common idiom that isn't "slop", or you cannot create ${MIN_ALTERNATIVES_PER_RULE}+ excellent alternatives in the **exact correct format**, **DO NOT** create a rule for it. Simply omit its object from the final JSON array.
--   **Focus on Narrative Prose**: The rules are intended for descriptive and narrative text.
--   **Final Output**: If you reject all candidates, your entire response must be an empty array: \`[]\`.
-
-Your output will be parsed directly by \`JSON.parse()\`. It must be perfect.`;
+        // Get the prompt template from the imported file
+        const systemPromptTemplate = prompts.generateAndSaveDynamicRulesWithSingleGremlin;
+        // Inject the dynamic value. Using a regex with 'g' flag ensures all instances are replaced.
+        const systemPrompt = systemPromptTemplate.replace(/\$\{MIN_ALTERNATIVES_PER_RULE\}/g, MIN_ALTERNATIVES_PER_RULE);
 
         const formattedCandidates = candidatesForGeneration.map(c => `- ${JSON.stringify(c)}`).join('\n');
         const userPrompt = `Generate the JSON array of regex rules for the following candidates:\n${formattedCandidates}\n\nFollow all instructions precisely.`;
@@ -808,7 +690,8 @@ Current Cycle: ${currentCycle} of ${totalCycles}. Your turn as ${twinRole}.
         if (twinRole === 'vex') {
             prompt += "- Focus on CREATIVITY and DIVERSITY for alternatives. Generate new ones, refine existing ones to be more evocative and distinct.\n";
             prompt += "- If `findRegex` exists, ensure your alternatives match its capture groups. If not, you can suggest a basic `findRegex` structure that would support good alternatives.\n";
-            prompt += `- Aim to have a strong list of at least 7-10 good alternatives after your turn. Quality over quantity if forced, but try for both.\n`;
+            prompt += `- Aim to have a strong list of at least 7-10 good alternatives after your turn. Quality over quantity if forced, but try for both.
+`
             prompt += `- Provide brief \`notes_for_vax\` outlining your changes, any regex thoughts, or areas Vax should focus on for technical refinement.\n`;
             prompt += 'Output JSON with keys: "findRegex" (string, your best version or proposal), "alternatives" (array of strings, your refined/expanded list), "notes_for_vax" (string, which is optional).\n'; 
         } else { // Vax's turn
@@ -821,7 +704,7 @@ Current Cycle: ${currentCycle} of ${totalCycles}. Your turn as ${twinRole}.
     - Generate a concise, descriptive \`scriptName\` for the rule.
     - **CRITICAL \`replaceString\` FORMATTING**: Compile the final list of alternatives into a single \`replaceString\`. This string MUST be in the exact format: \`{{random:alt1,alt2,alt3,...,altN}}\`.
     - Alternatives MUST be separated by a **single comma (,)**. Do not use pipes (|) or any other separator.
-    - **Refer to correctly formatted examples like**: \`"replaceString": "{{random:first option,second option,third option with $1,fourth,fifth}}" \` (Ensure you use actual generated alternatives, not these placeholders).
+    - **Refer to correctly formatted examples like**: \`"replaceString": "{{random:first option,second option,third option with $1,fourth,fifth}}"\` (Ensure you use actual generated alternatives, not these placeholders).
 Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceString" (string). All fields are mandatory.\n`;
             } else {
                 prompt += `- Aim to solidify the \`findRegex\` and ensure the \`alternatives\` list is growing well.\n`;
@@ -829,7 +712,7 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
                 prompt += 'Output JSON with keys: "findRegex" (string, your refined version), "alternatives" (array of strings, your refined/expanded list), "notes_for_vex" (string, which is optional).\n';
             }
         }
-        prompt += `\nIMPORTANT: Output ONLY the JSON object. No other text or markdown.\nIf, on Vaxs final turn, you determine this candidate cannot be made into a high-quality rule meeting all criteria (especially the ${MIN_ALTERNATIVES_PER_RULE} alternatives and the **exact** \`replaceString\` format), output an empty JSON object: {}.\n`;
+        prompt += `\nIMPORTANT: Output ONLY the JSON object. No other text or markdown.\nIf, on Vaxs final turn, you determine this candidate cannot be made into a high-quality rule meeting all criteria (especially the ${MIN_ALTERNATIVES_PER_RULE} alternatives and the **exact** \`replaceString\` format), output an empty JSON object: {}.`;
         return prompt;
     }
 
@@ -993,7 +876,7 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
         this.callGenericPopup(contentHtml, this.POPUP_TYPE.TEXT, "Live Frequency Data (Slop Score)", { wide: true, large: true });
     }
 
-    escapeHtml(unsafe) {
+   escapeHtml(unsafe) {
         if (typeof unsafe !== 'string') return '';
         return unsafe
              .replace(/&/g, "&amp;")
@@ -1103,7 +986,7 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
                 });
                 listElement.appendChild(item);
             });
-        }; 
+        };
 
         const addWord = () => {
             const newWord = inputElement.value.trim().toLowerCase();
