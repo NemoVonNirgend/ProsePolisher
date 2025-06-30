@@ -327,6 +327,8 @@ export async function runGremlinPlanningPipeline() {
         if (!await applyGremlinEnvironment('papa')) {
             throw new Error("Failed to configure environment for Papa Gremlin.");
         }
+        console.log('[ProjectGremlin] Flushing injections before Papa Gremlin drafting...');
+        await getContext().executeSlashCommandsWithOptions('/flushinject', { showOutput: false, handleExecutionErrors: true });
         const papaResult = await executeGen(blueprintInstruction);
         if (!papaResult.trim()) throw new Error("Papa Gremlin failed to produce a blueprint.");
         blueprint = papaResult;
