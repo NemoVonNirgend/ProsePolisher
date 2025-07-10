@@ -1,6 +1,5 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 
-// **THE FIX IS HERE**
 // This map correctly translates the API key from the UI dropdown (e.g., 'makersuite')
 // to the string that SillyTavern's /api slash command expects (e.g., 'google').
 const CONNECT_API_MAP = {
@@ -282,12 +281,11 @@ export async function executeGen(promptText) {
         throw new Error("SillyTavern not ready to execute generation.");
     }
     const context = getContext();
-    // *** FIX STARTS HERE ***
-    // Manually escape the necessary characters to create a valid quoted string for the slash command.
-    // This is more robust than JSON.stringify for the ST parser and avoids errors.
-    const sanitizedPrompt = promptText.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
-    const script = `/gen "${sanitizedPrompt}" |`;
-    // *** FIX ENDS HERE ***
+
+    // Using JSON.stringify is the most robust way to create a valid string literal
+    // that the slash command parser can handle. It correctly escapes all necessary
+    // characters (like quotes, backslashes, etc.) and wraps the result in quotes.
+    const script = `/gen ${JSON.stringify(promptText)} |`;
 
     console.log(`[ProjectGremlin] Executing generation: /gen "..." |`);
     try {
@@ -300,7 +298,7 @@ export async function executeGen(promptText) {
         }
         return result.pipe || '';
     } catch (error) {
-        console.error(`[ProjectGremlin] Error executing generation script: "${script.substring(0, 100)}..."`, error);
+        console.error(`[ProjectGremlin] Error executing generation script: "${promptText.substring(0, 100)}..."`, error);
         window.toastr.error(`Project Gremlin failed during generation. Error: ${error.message}`, "Project Gremlin Generation Failed");
         throw error;
     }

@@ -400,6 +400,11 @@ async function showApiEditorPopup(gremlinRole) {
     const currentSource = settings[`gremlin${roleUpper}Source`] || '';
     const currentCustomUrl = settings[`gremlin${roleUpper}CustomUrl`] || '';
 
+    // *** FIX STARTS HERE: Get the main UI's custom URL value ***
+    const mainCustomUrlInput = document.getElementById('custom_api_url_text');
+    const mainCustomUrl = mainCustomUrlInput ? mainCustomUrlInput.value.trim() : '';
+    // *** FIX ENDS HERE ***
+
     const popupContent = document.createElement('div');
     popupContent.innerHTML = `
         <div class="pp-custom-binding-inputs" style="display: flex; flex-direction: column; gap: 10px;">
@@ -495,7 +500,10 @@ async function showApiEditorPopup(gremlinRole) {
 
     modelSelect.value = currentModel;
     customModelInput.value = currentModel;
-    customUrlInput.value = currentCustomUrl;
+    // *** FIX STARTS HERE: Pre-fill the Custom URL input ***
+    // Use the role's saved URL if it exists, otherwise fall back to the main UI's setting.
+    customUrlInput.value = currentCustomUrl || mainCustomUrl;
+    // *** FIX ENDS HERE ***
     sourceInput.value = currentSource;
 
     popupContent.querySelector('#pp-unbind-btn').addEventListener('pointerup', () => {
@@ -730,6 +738,11 @@ async function showChaosOptionEditorPopup(optionId, onSaveCallback) {
         return;
     }
 
+    // *** FIX STARTS HERE: Get the main UI's custom URL value ***
+    const mainCustomUrlInput = document.getElementById('custom_api_url_text');
+    const mainCustomUrl = mainCustomUrlInput ? mainCustomUrlInput.value.trim() : '';
+    // *** FIX ENDS HERE ***
+
     const popupContent = document.createElement('div');
     popupContent.innerHTML = `
         <div class="pp-custom-binding-inputs" style="display: flex; flex-direction: column; gap: 15px;">
@@ -830,7 +843,9 @@ async function showChaosOptionEditorPopup(optionId, onSaveCallback) {
 
     modelSelect.value = option.model;
     customModelInput.value = option.model;
-    customUrlInput.value = option.customUrl;
+    // *** FIX STARTS HERE: Pre-fill the Custom URL input for Chaos options ***
+    customUrlInput.value = option.customUrl || mainCustomUrl;
+    // *** FIX ENDS HERE ***
     sourceInput.value = option.source;
 
     if (await callGenericPopup(popupContent, POPUP_TYPE.CONFIRM, isNew ? 'Add Chaos Option' : 'Edit Chaos Option')) {
@@ -1155,15 +1170,17 @@ async function onUserMessageRenderedForGremlin(messageId) {
 
         window.toastr.success("Gremlin Pipeline: Blueprint complete! Prompt instruction prepared.", "Project Gremlin");
         
-        // *** FIX & ENHANCEMENT STARTS HERE ***
+        // *** ROBUST FIX & ENHANCEMENT STARTS HERE ***
         const adherenceInstruction = "[System: Adhere to the detailed blueprint provided in the following instruction.]";
-        const sanitizedAdherence = adherenceInstruction.replace(/"/g, '\\"');
-        const sanitizedBlueprint = finalInjectedInstruction.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 
-        const finalScript = `/inject id=gremlin_adherence_prompt position=chat depth=0 "${sanitizedAdherence}" | /inject id=gremlin_final_plan position=chat depth=2 "${sanitizedBlueprint}"`;
+        // Let JSON.stringify handle all escaping for both injections.
+        const adherenceArg = JSON.stringify(adherenceInstruction);
+        const blueprintArg = JSON.stringify(finalInjectedInstruction);
+
+        const finalScript = `/inject id=gremlin_adherence_prompt position=chat depth=0 ${adherenceArg} | /inject id=gremlin_final_plan position=chat depth=2 ${blueprintArg}`;
 
         await context.executeSlashCommands(finalScript);
-        // *** FIX & ENHANCEMENT ENDS HERE ***
+        // *** ROBUST FIX & ENHANCEMENT ENDS HERE ***
 
     } catch (error) {
         console.error('[ProjectGremlin] A critical error occurred during the pipeline execution:', error);
