@@ -6,13 +6,6 @@ import { openai_setting_names, chat_completion_sources } from '../../../../scrip
 
 // Local module imports
 import { PresetNavigator, injectNavigatorModal, generateUUID } from './navigator.js';
-import {
-    runGremlinPlanningPipeline, applyGremlinEnvironment, executeGen, applyGremlinWriterChaosOption,
-    DEFAULT_PAPA_INSTRUCTIONS as PG_DEFAULT_PAPA_INSTRUCTIONS,
-    DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE as PG_DEFAULT_TWINS_VEX_INSTRUCTIONS_BASE,
-    DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE as PG_DEFAULT_TWINS_VAX_INSTRUCTIONS_BASE,
-    DEFAULT_MAMA_INSTRUCTIONS as PG_DEFAULT_MAMA_INSTRUCTIONS
-} from './projectgremlin.js';
 import { Analyzer } from './analyzer.js';
 
 // 1. CONFIGURATION AND STATE
@@ -1361,6 +1354,10 @@ async function initializeExtensionCore() {
         console.log(`${LOG_PREFIX} Initializing core components...`);
         extension_settings[EXTENSION_NAME] = { ...defaultSettings, ...extension_settings[EXTENSION_NAME] };
         const settings = extension_settings[EXTENSION_NAME];
+        if (settings.regexGenerationMethod !== 'current') {
+            settings.regexGenerationMethod = 'current';
+            saveSettingsDebounced();
+        }
 
         dynamicRules = settings.dynamicRules || []; 
         dynamicRules.forEach(rule => { if (!rule.id) rule.id = `DYN_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`; });
@@ -1645,8 +1642,8 @@ async function initializeExtensionCore() {
                 updateGremlinSettingsVisibility(); // Initial visibility setup for Gremlin settings
             } catch (err) { console.error(`${LOG_PREFIX} Error populating Gremlin preset dropdowns or binding instruction editors:`, err); }
 
-            eventSource.on(event_types.GENERATION_AFTER_COMMANDS, onBeforeGremlinGeneration);
-            eventSource.makeLast(event_types.USER_MESSAGE_RENDERED, (messageId) => onUserMessageRenderedForGremlin(messageId)); 
+            // Project Gremlin execution moved to Nemo Orchestrator. The legacy settings
+            // remain in extension_settings so the standalone extension can import them.
             eventSource.on(event_types.chat_id_changed, () => { processedMessageIds.clear(); console.log(`${LOG_PREFIX} Chat changed, cleared processed message ID cache.`); });
 
             await updateGlobalRegexArray();
