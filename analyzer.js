@@ -1,7 +1,7 @@
 import { getContext } from '../../../extensions.js';
 import { generateText } from './generation.js';
 import { normalizeRule, validateGeneratedRule } from './rule-utils.js';
-import { prompts } from './prompts.js'; // <-- IMPORT THE NEW PROMPTS FILE
+import { buildRuleGenerationPrompt, prompts } from './prompts.js';
 
 // Import all new and existing data files
 import { commonWords } from './common_words.js';
@@ -173,7 +173,18 @@ export class Analyzer {
                         continue;
                     }
 
-                    const currentData = this.ngramFrequencies.get(lemmatizedNgram) || { count: 0, score: 0, lastSeenMessageIndex: this.totalAiMessagesProcessed, original: originalNgram, contextSentence: sentence };
+                    const currentData = this.ngramFrequencies.get(lemmatizedNgram) || {
+                        count: 0,
+                        score: 0,
+                        lastSeenMessageIndex: this.totalAiMessagesProcessed,
+                        original: originalNgram,
+                        contextSentence: sentence,
+                        contexts: [],
+                    };
+                    const contexts = [
+                        ...(currentData.contexts || [currentData.contextSentence]).filter(Boolean),
+                    ];
+                    if (!contexts.includes(sentence)) contexts.push(sentence);
 
                     let scoreIncrement = 1.0;
                     
@@ -192,8 +203,9 @@ export class Analyzer {
                         count: newCount,
                         score: newScore,
                         lastSeenMessageIndex: this.totalAiMessagesProcessed,
-                        original: originalNgram, 
+                        original: originalNgram,
                         contextSentence: sentence,
+                        contexts: contexts.slice(-5),
                     });
 
                     if (newScore >= SLOP_THRESHOLD && currentData.score < SLOP_THRESHOLD) { 
@@ -429,15 +441,11 @@ export class Analyzer {
             return 0;
         }
 
-        const defaultPrompt = prompts.generateAndSaveDynamicRules.replace(
-            /\$\{MIN_ALTERNATIVES_PER_RULE\}/g,
+        const fullPrompt = buildRuleGenerationPrompt(
+            this.settings.regexGenerationInstructions,
+            candidatesForGeneration,
             MIN_ALTERNATIVES_PER_RULE,
         );
-        const promptTemplate = this.settings.regexGenerationInstructions || defaultPrompt;
-        const candidatePayload = JSON.stringify(candidatesForGeneration, null, 2);
-        const fullPrompt = promptTemplate.includes('{{CANDIDATES}}')
-            ? promptTemplate.replaceAll('{{CANDIDATES}}', candidatePayload)
-            : `${promptTemplate}\n\nGenerate rules for these candidates:\n${candidatePayload}`;
 
         let addedCount = 0;
         try {
@@ -470,7 +478,16 @@ export class Analyzer {
                 }
 
                 const rule = normalizeRule(candidateRule);
-                const validation = validateGeneratedRule(rule, MIN_ALTERNATIVES_PER_RULE);
+                const groundedContexts = candidatesForGeneration.flatMap(candidate =>
+                    Array.isArray(candidate.enhanced_context)
+                        ? candidate.enhanced_context
+                        : [candidate.enhanced_context],
+                ).filter(Boolean);
+                const validation = validateGeneratedRule(
+                    rule,
+                    MIN_ALTERNATIVES_PER_RULE,
+                    groundedContexts,
+                );
                 if (!validation.valid) {
                     console.warn(`${LOG_PREFIX} Rejected generated rule '${rule.scriptName}':`, validation.errors);
                     continue;
@@ -512,14 +529,23 @@ export class Analyzer {
         const candidatesForAi = [];
         const contextMap = new Map();
         for (const data of this.ngramFrequencies.values()) {
-            contextMap.set(data.original, data.contextSentence);
+            contextMap.set(
+                data.original,
+                (data.contexts || [data.contextSentence]).filter(Boolean),
+            );
         }
 
         // 1. Process merged patterns
         for (const [pattern, score] of Object.entries(this.analyzedLeaderboardData.merged)) {
+            const contexts = [...contextMap.entries()]
+                .filter(([phrase]) => phrase.includes(pattern) || pattern.includes(phrase))
+                .flatMap(([, examples]) => examples)
+                .filter((example, index, all) => all.indexOf(example) === index)
+                .slice(0, 5);
+            if (contexts.length === 0) continue;
             candidatesForAi.push({
                 candidate: pattern,
-                enhanced_context: pattern, // For patterns, the pattern itself is the best context
+                enhanced_context: contexts,
                 score: score,
             });
         }
@@ -528,7 +554,7 @@ export class Analyzer {
         for (const [phrase, score] of Object.entries(this.analyzedLeaderboardData.remaining)) {
             candidatesForAi.push({
                 candidate: phrase,
-                enhanced_context: contextMap.get(phrase) || phrase, // Use real sentence context
+                enhanced_context: contextMap.get(phrase) || [],
                 score: score,
             });
         }
