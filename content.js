@@ -8,13 +8,17 @@ import { openai_setting_names, chat_completion_sources } from '../../../../scrip
 import { PresetNavigator, injectNavigatorModal, generateUUID } from './navigator.js';
 import { Analyzer } from './analyzer.js';
 import { applyRule, normalizeRule, parseAlternatives, previewRule, validateRule } from './rule-utils.js';
+import {
+    PROSE_POLISHER_RULE_PREFIX,
+    syncGlobalRegexRules,
+} from './global-regex.js';
 
 // 1. CONFIGURATION AND STATE
 // -----------------------------------------------------------------------------
 export const EXTENSION_NAME = "ProsePolisher";
 const LOG_PREFIX = `[${EXTENSION_NAME}]`;
 const EXTENSION_FOLDER_PATH = `scripts/extensions/third-party/${EXTENSION_NAME}`;
-const PROSE_POLISHER_ID_PREFIX = '_prosePolisherRule_';
+const PROSE_POLISHER_ID_PREFIX = PROSE_POLISHER_RULE_PREFIX;
 const GREMLIN_ROLES = ['papa', 'twins', 'mama', 'writer', 'auditor'];
 
 // --- State Variables ---
@@ -215,52 +219,16 @@ async function updateGlobalRegexArray() {
         return;
     }
 
-    // Always filter first to ensure a clean slate
-    if (!extension_settings.regex) extension_settings.regex = [];
-    extension_settings.regex = extension_settings.regex.filter(rule => !rule.id?.startsWith(PROSE_POLISHER_ID_PREFIX));
-
-    // Add rules back only if integration is enabled
-    if (settings.integrateWithGlobalRegex) {
-        const rulesToAdd = [];
-        if (settings.isStaticEnabled) {
-            rulesToAdd.push(...staticRules);
-        }
-        if (settings.isDynamicEnabled) {
-            rulesToAdd.push(...dynamicRules);
-        }
-        
-        const activeRulesForGlobal = rulesToAdd.filter(rule => !rule.disabled);
-
-        for (const rule of activeRulesForGlobal) {
-            // *** FIX: Updated the global rule object format ***
-            const globalRule = {
-                id: `${PROSE_POLISHER_ID_PREFIX}${rule.id || rule.scriptName.replace(/\s+/g, '_')}`,
-                scriptName: `(PP) ${rule.scriptName}`,
-                findRegex: rule.findRegex,
-                replaceString: normalizeRule(rule).replaceString,
-                disabled: rule.disabled,
-                substituteRegex: 0, 
-                minDepth: null, 
-                maxDepth: null, 
-                trimStrings: [],
-                placement: [0, 2, 3, 5, 6], 
-                runOnEdit: false, 
-                markdownOnly: true,
-                promptOnly: true,
-            };
-            extension_settings.regex.push(globalRule);
-        }
-        console.log(`${LOG_PREFIX} Updated global regex array. ProsePolisher rules active in global list: ${activeRulesForGlobal.length}.`);
-    } else {
-        console.log(`${LOG_PREFIX} Global regex integration is OFF. ProsePolisher rules removed from global list.`);
-    }
+    const rules = [];
+    if (settings.isStaticEnabled) rules.push(...staticRules);
+    if (settings.isDynamicEnabled) rules.push(...dynamicRules);
+    extension_settings.regex = syncGlobalRegexRules(
+        extension_settings.regex,
+        rules,
+        settings.integrateWithGlobalRegex,
+    );
 
     saveSettingsDebounced();
-
-    // Update the analyzer's internal regex list
-    if (prosePolisherAnalyzer) {
-        prosePolisherAnalyzer.compiledRegexes = getCompiledRegexes();
-    }
 }
 
 function hideRulesInStandardUI() {
@@ -1585,11 +1553,9 @@ async function initializeExtensionCore() {
         if (!buttonContainer) {
             buttonContainer = document.createElement('div');
             buttonContainer.id = 'pp-chat-buttons-container';
-            const sendButtonHolder = document.getElementById('send_but_holder');
-            const chatBar = document.getElementById('chat_bar');
-            if (sendButtonHolder) sendButtonHolder.parentElement?.insertBefore(buttonContainer, sendButtonHolder.nextSibling);
-            else if (chatBar) chatBar.appendChild(buttonContainer); 
-            else document.querySelector('.mes_controls')?.appendChild(buttonContainer);
+            const rightSendForm = document.getElementById('rightSendForm');
+            const sendButton = document.getElementById('send_but');
+            if (rightSendForm) rightSendForm.insertBefore(buttonContainer, sendButton);
         }
         buttonContainer.insertAdjacentHTML('beforeend', `<button id="pp_gremlin_toggle" class="fa-solid fa-hat-wizard" title="Toggle Project Gremlin Pipeline"></button>`);
         const gremlinToggle = document.getElementById('pp_gremlin_toggle');
@@ -1712,7 +1678,7 @@ async function initializeExtensionCore() {
 
             // Project Gremlin execution moved to Nemo Orchestrator. The legacy settings
             // remain in extension_settings so the standalone extension can import them.
-            eventSource.on(event_types.chat_id_changed, () => { processedMessageIds.clear(); console.log(`${LOG_PREFIX} Chat changed, cleared processed message ID cache.`); });
+            eventSource.on(event_types.CHAT_CHANGED, () => { processedMessageIds.clear(); console.log(`${LOG_PREFIX} Chat changed, cleared processed message ID cache.`); });
 
             await updateGlobalRegexArray();
             compileInternalActiveRules(); 
