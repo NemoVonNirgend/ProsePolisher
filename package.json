@@ -1,0 +1,8 @@
+{
+    "name": "prose-polisher",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "test": "node --test"
+    }
+}
