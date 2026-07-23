@@ -8,15 +8,13 @@ export const prompts = {
 2.  Something that can plausibly be fixed or enhanced with alternative phrasing.
 3.  Not a random fragment, a character name, or a piece of code/metadata.
 
-For each *valid* candidate, you will provide an "enhanced context" - a representative full sentence (or a couple of sentences) where this phrase or a similar one might occur naturally in a story, incorporating it smoothly. This helps a later system understand how to generate alternatives.
+Each candidate includes an \`enhanced_context\` copied from the user's actual chat. Treat it as evidence. Do not rewrite it, embellish it, or invent a representative sentence.
 
 For each *invalid* candidate, you will briefly explain why it's invalid.
 
 Output a JSON array of objects. Each object must have:
 - \`candidate\`: The original phrase/pattern you are evaluating.
 - \`valid_for_regex\`: A boolean (true/false).
-- If \`valid_for_regex\` is \`true\`:
-    - \`enhanced_context\`: A string, representing a full sentence or two where the \`candidate\` would naturally fit. Ensure this context feels organic and helpful.
 - If \`valid_for_regex\` is \`false\`:
     - \`reason\`: A brief string explaining why it's not valid (e.g., "Too short", "Nonsensical fragment", "Metadata").
 
@@ -31,13 +29,11 @@ Example output:
 [
   {
     "candidate": "a flicker of doubt crossed his face",
-    "valid_for_regex": true,
-    "enhanced_context": "When she revealed her true intentions, a flicker of doubt crossed his face, a momentary crack in his usually stoic demeanor."
+    "valid_for_regex": true
   },
   {
     "candidate": "he looked at her",
-    "valid_for_regex": true,
-    "enhanced_context": "He looked at her across the crowded room, a silent question passing between their gazes."
+    "valid_for_regex": true
   },
   {
     "candidate": "the",
