@@ -6,6 +6,7 @@ import {
     parseAlternatives,
     previewRule,
     serializeAlternatives,
+    validateGeneratedRule,
     validateRule,
 } from '../rule-utils.js';
 
@@ -69,4 +70,35 @@ test('serializer uses the current SillyTavern double-colon syntax', () => {
         serializeAlternatives(['first', 'second, with punctuation']),
         '{{random::first::second, with punctuation}}',
     );
+});
+
+test('generated rules require semantic and compatibility evidence', () => {
+    const validation = validateGeneratedRule({
+        scriptName: 'Look',
+        findRegex: '([Hh]e|[Ss]he) looked away',
+        alternatives: ['$1 turned away', '$1 shifted $1 gaze aside'],
+        semanticInvariant: 'The subject redirects their gaze away.',
+        testCases: [
+            'He looked away before answering.',
+            'For a moment, she looked away.',
+            'She looked away, then folded the letter.',
+        ],
+        risk: 'low',
+    }, 2);
+
+    assert.equal(validation.valid, true);
+});
+
+test('high-risk generated rules are rejected', () => {
+    const validation = validateGeneratedRule({
+        scriptName: 'Emotion',
+        findRegex: 'looked',
+        alternatives: ['glared'],
+        semanticInvariant: 'The subject directs their gaze.',
+        testCases: ['He looked at her.', 'She looked down.', 'They looked outside.'],
+        risk: 'high',
+    });
+
+    assert.equal(validation.valid, false);
+    assert.match(validation.errors.join(' '), /High-risk/);
 });
