@@ -61,3 +61,31 @@ test('disabling integration removes only Prose Polisher rules', () => {
 
     assert.deepEqual(result, [{ id: 'unrelated' }]);
 });
+
+test('global rule construction uses stable fallbacks without mutating source rules', () => {
+    const source = {
+        scriptName: 'Slow Nod',
+        findRegex: 'nodded slowly',
+        alternatives: ['gave a slow nod', 'nodded at a measured pace'],
+    };
+    const before = structuredClone(source);
+    const result = buildGlobalRegexRule(source);
+
+    assert.equal(result.id, `${PROSE_POLISHER_RULE_PREFIX}Slow_Nod`);
+    assert.equal(result.scriptName, '(PP) Slow Nod');
+    assert.equal(result.promptOnly, true);
+    assert.equal(result.markdownOnly, true);
+    assert.deepEqual(source, before);
+});
+
+test('synchronization accepts a missing global rule array', () => {
+    const result = syncGlobalRegexRules(undefined, [{
+        id: 'new',
+        scriptName: 'New',
+        findRegex: 'old',
+        alternatives: ['new'],
+    }], true);
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0].id, `${PROSE_POLISHER_RULE_PREFIX}new`);
+});
