@@ -11,7 +11,7 @@
                 <strong>Project Gremlin is moving.</strong>
                 The multi-model generation pipeline now lives in
                 <a href="https://github.com/NemoVonNirgend/NemoOrchestrator" target="_blank" rel="noopener noreferrer">Nemo Orchestrator</a>.
-                The bundled version remains temporarily for configuration migration and will be removed after feature-parity testing.
+                Nemo Orchestrator imports your existing custom stage settings automatically. Prose Polisher preserves the saved source settings but no longer runs the pipeline.
             </div>
             <hr>
             <div class="form-group">
@@ -68,8 +68,6 @@
                     <label for="pp_regex_gen_method_selector" style="font-weight:normal; font-size: 0.85em; margin-bottom: 0;">Regex Generation Method:</label>
                     <select id="pp_regex_gen_method_selector" class="text_pole" style="font-size: 0.9em; padding: 4px;" title="Select how AI rules are generated after Twins' pre-screening.">
                         <option value="current">Use Current Connection</option>
-                        <option value="single">Single Gremlin</option>
-                        <option value="twins">Iterative Twins</option>
                     </select>
                 </div>
                 <div id="pp_regex_gen_single_gremlin_controls" style="display: flex; flex-direction: column; gap: 2px; flex-grow: 1; min-width: 250px;">
@@ -141,8 +139,8 @@
                 </div>
             </div>
 
-            <!-- PROJECT GREMLIN SETTINGS -->
-            <div class="inline-drawer">
+            <!-- Legacy settings are preserved in extension_settings for Nemo Orchestrator migration. -->
+            <div class="inline-drawer" id="pp_legacy_gremlin_settings">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b>Project Gremlin Settings</b>
                     <div class="inline-drawer-icon fa-solid fa-chevron-down down"></div>
