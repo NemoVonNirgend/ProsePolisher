@@ -424,3 +424,14 @@
 .prose-polisher-settings .inline-drawer-content > .inline-drawer > .inline-drawer-content {
     padding-top: 5px;
 }
+.pp-migration-notice {
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 78%, #8f78d6 22%);
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 65%, #8f78d6 35%);
+    border-radius: 8px;
+    margin: 10px 0 14px;
+    padding: 10px 12px;
+}
+
+.pp-migration-notice a {
+    color: var(--SmartThemeQuoteColor);
+}
