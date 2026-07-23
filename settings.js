@@ -22,12 +22,21 @@ export const DEFAULT_SETTINGS = {
 };
 
 export function normalizeSettings(existingSettings = {}) {
+    const safeSettings = existingSettings && typeof existingSettings === 'object'
+        ? existingSettings
+        : {};
+    const existingBlacklist = safeSettings.blacklist &&
+        typeof safeSettings.blacklist === 'object' &&
+        !Array.isArray(safeSettings.blacklist)
+        ? safeSettings.blacklist
+        : {};
+
     return {
         ...DEFAULT_SETTINGS,
-        ...existingSettings,
+        ...safeSettings,
         blacklist: {
             ...DEFAULT_SETTINGS.blacklist,
-            ...(existingSettings.blacklist || {}),
+            ...existingBlacklist,
         },
     };
 }
