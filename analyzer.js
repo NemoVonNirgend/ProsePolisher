@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import { generateText } from './generation.js';
-import { normalizeRule, validateRule } from './rule-utils.js';
+import { normalizeRule, validateGeneratedRule } from './rule-utils.js';
 import { prompts } from './prompts.js'; // <-- IMPORT THE NEW PROMPTS FILE
 
 // Import all new and existing data files
@@ -477,7 +477,7 @@ export class Analyzer {
             for (const candidateRule of newRules) {
                 if (candidateRule?.scriptName && candidateRule?.findRegex && (candidateRule?.alternatives || candidateRule?.replaceString)) {
                     const rule = normalizeRule(candidateRule);
-                    const validation = validateRule(rule, MIN_ALTERNATIVES_PER_RULE);
+                    const validation = validateGeneratedRule(rule, MIN_ALTERNATIVES_PER_RULE);
                     if (!validation.valid) {
                         console.warn(`${LOG_PREFIX} Rejected generated rule '${rule.scriptName}':`, validation.errors);
                         continue;
@@ -565,7 +565,7 @@ export class Analyzer {
                         isStatic: false,
                         isNew: true,
                     });
-                    const validation = validateRule(newRule, MIN_ALTERNATIVES_PER_RULE);
+                    const validation = validateGeneratedRule(newRule, MIN_ALTERNATIVES_PER_RULE);
                     if (!validation.valid) {
                         console.warn(`${LOG_PREFIX} Rejected iterative rule '${newRule.scriptName}':`, validation.errors);
                         continue;
