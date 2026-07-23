@@ -6,7 +6,13 @@
         </div>
         <div class="inline-drawer-content">
             <!-- ORIGINAL PROSE POLISHER SETTINGS -->
-            <p>A comprehensive tool to enhance AI writing quality by fixing echoes and repetitive phrases ('slop').</p>
+            <p>Analyze repetitive prose, inspect correction candidates, and control which rules may alter generated text.</p>
+            <div class="pp-migration-notice">
+                <strong>Project Gremlin is moving.</strong>
+                The multi-model generation pipeline now lives in
+                <a href="https://github.com/NemoVonNirgend/NemoOrchestrator" target="_blank" rel="noopener noreferrer">Nemo Orchestrator</a>.
+                The bundled version remains temporarily for configuration migration and will be removed after feature-parity testing.
+            </div>
             <hr>
             <div class="form-group">
                 <label class="checkbox_label">
@@ -88,6 +94,12 @@
                 <label class="checkbox_label">
                     <input type="checkbox" id="pp_skip_triage_check">
                     <span><b>Skip Triage/Twin Check:</b> Process regex candidates directly without AI triage/refinement.</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label class="checkbox_label">
+                    <input type="checkbox" id="pp_auto_activate_generated_rules">
+                    <span><b>Automatically activate generated rules:</b> Apply AI-created corrections immediately instead of holding them for review. Recommended: OFF.</span>
                 </label>
             </div>
 
