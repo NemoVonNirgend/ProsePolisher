@@ -106,6 +106,7 @@ const defaultSettings = {
     regexGeneratorRole: 'writer',
     regexTwinsCycles: 2,
     skipTriageCheck: false,
+    autoActivateGeneratedRules: false,
 
     // Prose Polisher - Analysis Engine
     slopThreshold: 5.0,
@@ -1501,6 +1502,15 @@ async function initializeExtensionCore() {
             skipTriageCheck.checked = settings.skipTriageCheck;
             skipTriageCheck.addEventListener('change', () => {
                 settings.skipTriageCheck = skipTriageCheck.checked;
+                saveSettingsDebounced();
+            });
+        }
+
+        const autoActivateGeneratedRules = document.getElementById('pp_auto_activate_generated_rules');
+        if (autoActivateGeneratedRules) {
+            autoActivateGeneratedRules.checked = settings.autoActivateGeneratedRules;
+            autoActivateGeneratedRules.addEventListener('change', () => {
+                settings.autoActivateGeneratedRules = autoActivateGeneratedRules.checked;
                 saveSettingsDebounced();
             });
         }
