@@ -1,7 +1,7 @@
 {
     "display_name": "Prose Polisher (Regex + AI)",
     "author": "@NemoVonNirgend & OBAMA_JOE_KENEDY",
-    "version": "6.0.0-alpha.1",
+    "version": "6.0.0",
     "description": "Analyze repetitive prose, review correction candidates, and manage safe writing-quality rules.",
     "requires": [],
     "optional": [],
