@@ -54,10 +54,12 @@ Example output:
 Strictly adhere to the JSON format. Do not add any other text.`,
 
     // Prompt for the single-gremlin (Writer/Editor/etc.) regex generation
-    generateAndSaveDynamicRulesWithSingleGremlin: `You are an expert literary editor and a master of Regex, tasked with elevating prose by eliminating repetitive phrasing ("slop"). Your goal is to generate high-quality, transformative alternatives for given text patterns.
+    generateAndSaveDynamicRulesWithSingleGremlin: `You are a conservative line editor and JavaScript regular-expression specialist. Your task is to replace genuinely repetitive wording without changing what happened, what a character meant, who performed an action, or how the surrounding sentence works.
 
 ## TASK
-Analyze the provided list of repetitive phrases/patterns. For each viable pattern, generate a corresponding JSON object for a find-and-replace rule. The input will provide the candidate phrase and an 'enhanced_context' which is a representative sentence where the phrase might occur. Use this context to understand the phrase's typical usage and implied writing style.
+Analyze the provided repetitive phrases. Create a rule only when the matched span can be replaced safely in multiple real sentences. Omit a candidate when its grammar or meaning depends too heavily on context.
+
+The goal is semantic and grammatical equivalence, not maximum creativity. A plain faithful replacement is better than a vivid replacement that invents information.
 
 ## INPUT FORMAT
 The input is a list of objects, each with:
@@ -81,7 +83,14 @@ Example input to you:
 ## OUTPUT SPECIFICATION
 Your entire response MUST be a single, raw, valid JSON array \`[...] \`. Do not wrap it in markdown fences or add any commentary.
 
-Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, and \`alternatives\`.
+Each object in the array must have these keys:
+
+- \`scriptName\`
+- \`findRegex\`
+- \`alternatives\`
+- \`semanticInvariant\`
+- \`testCases\`
+- \`risk\`
 
 1.  **scriptName**: A concise, descriptive name for the rule (e.g., "Slopfix - Fleeting Doubt Expression", "Slopfix - Rapid Heartbeat").
 2.  **findRegex**: A valid JavaScript-compatible regex string.
@@ -92,12 +101,39 @@ Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, an
     -   Each alternative MUST be its own JSON string. Normal punctuation, including commas, is allowed inside an alternative.
     -   Do not create a \`replaceString\` or a SillyTavern macro. Prose Polisher compiles the array safely.
     -   **Placeholders**: Use \`$1\`, \`$2\`, etc., to re-insert captured groups from your regex. Ensure these fit grammatically into your alternatives.
-    -   **Transformative Quality**:
-        -   **Avoid Superficial Changes**: Alternatives must be genuinely different.
-        -   **Evocative & Engaging**: Aim for vivid, impactful, and fresh phrasing.
-        -   **Maintain Grammatical Structure**: Alternatives, when placeholders are filled, must fit seamlessly.
-        -   **Infer Style**: Match the tone and style implied by the 'enhanced_context'.
-        -   **Literary Merit**: Each alternative should be of high literary quality.
+    -   Every alternative MUST preserve:
+        - the same subject and object;
+        - the same tense, person, number, and point of view;
+        - the same action, observation, certainty, and emotional intensity;
+        - the syntactic role of the matched span;
+        - any capture-group information required by the original phrase.
+    -   Do not invent a new emotion, motive, metaphor, body reaction, sensory fact, dialogue implication, or causal claim.
+    -   Do not turn an observation into internal knowledge. For example, visible hesitation cannot become certainty about fear.
+    -   Do not intensify or soften meaning. "Looked" cannot become "glared"; "uneasy" cannot become "terrified."
+    -   Do not introduce a new subject when the match is only a predicate or modifier.
+    -   Do not add terminal punctuation unless the regular expression consumes that punctuation.
+    -   Avoid replacements that require a specific word immediately before or after the matched span.
+    -   Prefer natural, restrained language. The replacement should disappear into the sentence rather than perform for the reader.
+
+4. **semanticInvariant**: One short sentence stating exactly what all replacements must preserve. Example: "The possessive subject experiences a visibly rapid heartbeat; no cause or additional emotion is asserted."
+
+5. **testCases**: An array of at least three complete, grammatically distinct sentences containing text that \`findRegex\` must match. Vary pronouns, sentence position, punctuation, and surrounding syntax. These are compatibility tests, not prose demonstrations.
+
+6. **risk**: One of \`"low"\`, \`"medium"\`, or \`"high"\`.
+    - \`low\`: narrow wording substitution with little contextual ambiguity.
+    - \`medium\`: grammar is stable but tone or implication could vary.
+    - \`high\`: meaning, syntax, or point of view is context-sensitive.
+    - Omit high-risk rules entirely.
+
+## REQUIRED SELF-CHECK
+
+Before returning a rule, mentally substitute every alternative into every test case and reject the rule if any combination:
+
+- is ungrammatical;
+- leaves a dangling capture token such as \`$2\`;
+- duplicates a neighboring subject, verb, preposition, or punctuation mark;
+- changes tense, number, point of view, agency, certainty, or intensity;
+- adds information that was not contained in the matched text.
 
 ## FULL OUTPUT EXAMPLES (ASSUMING MIN_ALTERNATIVES_PER_RULE IS 5):
 
@@ -106,7 +142,10 @@ Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, an
 {
   "scriptName": "Slopfix - Fleeting Doubt Expression",
   "findRegex": "\\\\b[aA]\\\\s+flicker\\\\s+of\\\\s+([a-zA-Z\\\\s]+?)\\\\s+(?:ignited|passed|cross|crossed|twisted)\\\\s+(?:in|across|through)\\\\s+([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+(?:eyes|face|mind|gut|depths)\\\\b",
-  "alternatives": ["a fleeting look of $1 crossed $2 face", "$2 eyes briefly clouded with $1", "a momentary shadow of $1 touched $2 features", "$2 expression betrayed a flash of $1", "$1 briefly surfaced in $2 gaze"]
+  "alternatives": ["a fleeting look of $1 crossed $2 face", "$1 briefly surfaced in $2 expression"],
+  "semanticInvariant": "A brief, outwardly visible trace of the captured state appears in the possessive subject's expression.",
+  "testCases": ["A flicker of doubt crossed his face before he answered.", "She paused when a flicker of suspicion passed across her eyes.", "For an instant, a flicker of recognition crossed their face."],
+  "risk": "medium"
 }
 \`\`\`
 
@@ -115,7 +154,10 @@ Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, an
 {
   "scriptName": "Slopfix - Rapid Heartbeat",
   "findRegex": "\\\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+heart\\\\s+(?:pounded|hammered|thudded|fluttered|raced)(?:\\\\s+in\\\\s+\\\\1\\\\s+(?:chest|ribs))?\\\\b",
-  "alternatives": ["a frantic rhythm drummed against $1 ribs", "$1 pulse hammered at the base of their throat", "$1 chest tightened with heavy thudding", "a nervous tremor started beneath $1 breastbone", "$1 heartbeat echoed in their ears like war drums"]
+  "alternatives": ["$1 pulse raced", "a rapid beat thudded in $1 chest"],
+  "semanticInvariant": "The possessive subject has a rapid, forceful heartbeat; no cause or additional emotion is asserted.",
+  "testCases": ["Her heart pounded in her chest as she reached the landing.", "His heart hammered, but his hands remained steady.", "For several seconds, their heart raced beneath the heavy coat."],
+  "risk": "low"
 }
 \`\`\`
 *(Note: Ensure you generate at least \${MIN_ALTERNATIVES_PER_RULE} alternatives for each rule in your actual output, even if the examples above show fewer for brevity here.)*
@@ -123,6 +165,7 @@ Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, an
 ## CORE PRINCIPLES
 -   **High-Quality Alternatives & Valid JSON are Paramount**: Prioritize genuinely transformative and well-written alternatives. If you cannot produce at least \${MIN_ALTERNATIVES_PER_RULE} suitable replacements, omit the rule.
 -   **Reject Unsuitable Patterns**: If an input pattern is too generic (e.g., "he said that"), conversational, a common idiom that isn't "slop", or cannot support \${MIN_ALTERNATIVES_PER_RULE}+ excellent alternatives, omit it from the final JSON array.
+-   **Preservation Beats Variety**: Repetition is preferable to a replacement that changes meaning or breaks the sentence.
 -   **Focus on Narrative Prose**: The rules are intended for descriptive and narrative text.
 -   **Final Output**: If you reject all candidates, your entire response must be an empty array: \`[]\`.
 
