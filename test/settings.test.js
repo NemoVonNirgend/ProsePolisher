@@ -27,3 +27,21 @@ test('settings normalization preserves user values and legacy migration data', (
     assert.equal(settings.blacklist.custom, 7);
     assert.equal(settings.blacklist.ozone, 3);
 });
+
+test('settings normalization tolerates corrupt non-object storage', () => {
+    assert.deepEqual(normalizeSettings(null).blacklist, DEFAULT_SETTINGS.blacklist);
+    assert.deepEqual(normalizeSettings('invalid').blacklist, DEFAULT_SETTINGS.blacklist);
+    assert.deepEqual(
+        normalizeSettings({ blacklist: ['not', 'a', 'map'] }).blacklist,
+        DEFAULT_SETTINGS.blacklist,
+    );
+});
+
+test('normalized blacklists do not mutate shared defaults', () => {
+    const first = normalizeSettings({});
+    const second = normalizeSettings({});
+
+    first.blacklist.ozone = 99;
+    assert.equal(second.blacklist.ozone, 3);
+    assert.equal(DEFAULT_SETTINGS.blacklist.ozone, 3);
+});
