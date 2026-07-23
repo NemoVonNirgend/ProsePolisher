@@ -440,3 +440,31 @@
 #pp_gremlin_toggle {
     display: none !important;
 }
+
+.pp-rule-validation {
+    border-radius: 6px;
+    margin-top: 8px;
+    padding: 8px 10px;
+}
+
+.pp-rule-validation.is-valid {
+    background: color-mix(in srgb, #3c9b65 18%, transparent);
+}
+
+.pp-rule-validation.is-invalid {
+    background: color-mix(in srgb, #b94a48 20%, transparent);
+}
+
+.pp-rule-preview-results {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.pp-rule-preview-card {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    display: grid;
+    gap: 4px;
+    padding: 8px 10px;
+}
