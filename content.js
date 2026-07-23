@@ -7,6 +7,7 @@ import { openai_setting_names, chat_completion_sources } from '../../../../scrip
 // Local module imports
 import { PresetNavigator, injectNavigatorModal, generateUUID } from './navigator.js';
 import { Analyzer } from './analyzer.js';
+import { applyRule, normalizeRule, parseAlternatives, previewRule, validateRule } from './rule-utils.js';
 
 // 1. CONFIGURATION AND STATE
 // -----------------------------------------------------------------------------
@@ -202,23 +203,7 @@ function applyProsePolisherReplacements(text) {
     }
 
     rulesToApply.forEach(rule => {
-        try {
-            const regex = new RegExp(rule.findRegex, 'gi');
-            if (rule.replaceString.includes('{{random:')) {
-                const optionsMatch = rule.replaceString.match(/\{\{random:([\s\S]+?)\}\}/);
-                if (optionsMatch && optionsMatch[1]) {
-                    const options = optionsMatch[1].split(',');
-                    replacedText = replacedText.replace(regex, (match, ...args) => {
-                        const chosenOption = options[Math.floor(Math.random() * options.length)].trim();
-                        return chosenOption.replace(/\$(\d)/g, (_, groupIndex) => args[parseInt(groupIndex) - 1] || '');
-                    });
-                }
-            } else {
-                replacedText = replacedText.replace(regex, rule.replaceString);
-            }
-        } catch (e) {
-            console.warn(`${LOG_PREFIX} Invalid regex in rule '${rule.scriptName}', skipping:`, e);
-        }
+        replacedText = applyRule(replacedText, rule);
     });
     return replacedText;
 }
@@ -252,7 +237,7 @@ async function updateGlobalRegexArray() {
                 id: `${PROSE_POLISHER_ID_PREFIX}${rule.id || rule.scriptName.replace(/\s+/g, '_')}`,
                 scriptName: `(PP) ${rule.scriptName}`,
                 findRegex: rule.findRegex,
-                replaceString: rule.replaceString,
+                replaceString: normalizeRule(rule).replaceString,
                 disabled: rule.disabled,
                 substituteRegex: 0, 
                 minDepth: null, 
@@ -1255,7 +1240,7 @@ class RegexNavigator {
         const isNew = ruleId === null;
         let rule;
         if (isNew) {
-            rule = { id: `DYN_${Date.now()}_${Math.random().toString(36).substr(2,5)}`, scriptName: '', findRegex: '', replaceString: '', disabled: false, isStatic: false, isNew: true };
+            rule = { id: `DYN_${Date.now()}_${Math.random().toString(36).substr(2,5)}`, scriptName: '', findRegex: '', alternatives: [], replaceString: '', disabled: true, isStatic: false, isNew: true };
         } else {
             rule = dynamicRules.find(r => r.id === ruleId) || staticRules.find(r => r.id === ruleId);
         }
@@ -1265,15 +1250,55 @@ class RegexNavigator {
         editorContent.dataset.ruleId = rule.id;
         editorContent.innerHTML = `
             <label for="pp_editor_name">Rule Name</label>
-            <input type="text" id="pp_editor_name" class="text_pole" value="${rule.scriptName?.replace(/"/g, '"') || ''}" ${rule.isStatic ? 'disabled' : ''}>
+            <input type="text" id="pp_editor_name" class="text_pole" ${rule.isStatic ? 'disabled' : ''}>
             <label for="pp_editor_find">Find Regex (JavaScript format)</label>
-            <textarea id="pp_editor_find" class="text_pole" ${rule.isStatic ? 'disabled' : ''}>${rule.findRegex || ''}</textarea>
-            <label for="pp_editor_replace">Replace String (use {{random:opt1,opt2}} for variants)</label>
-            <textarea id="pp_editor_replace" class="text_pole" ${rule.isStatic ? 'disabled' : ''}>${rule.replaceString || ''}</textarea>
+            <textarea id="pp_editor_find" class="text_pole" ${rule.isStatic ? 'disabled' : ''}></textarea>
+            <label for="pp_editor_alternatives">Replacement alternatives (one per line)</label>
+            <textarea id="pp_editor_alternatives" class="text_pole" ${rule.isStatic ? 'disabled' : ''}></textarea>
+            <button id="pp_editor_preview" class="menu_button" type="button">Preview Against Current Chat</button>
+            <div id="pp_editor_validation" class="pp-rule-validation" aria-live="polite"></div>
+            <div id="pp_editor_preview_results" class="pp-rule-preview-results"></div>
             <div class="editor-actions">
                 <div class="actions-left"><label class="checkbox_label"><input type="checkbox" id="pp_editor_disabled" ${rule.disabled ? 'checked' : ''}><span>Disabled</span></label></div>
                 ${!rule.isStatic ? '<button id="pp_editor_delete" class="menu_button is_dangerous">Delete Rule</button>' : ''}
             </div>`;
+        const nameInput = editorContent.querySelector('#pp_editor_name');
+        const findInput = editorContent.querySelector('#pp_editor_find');
+        const alternativesInput = editorContent.querySelector('#pp_editor_alternatives');
+        nameInput.value = rule.scriptName || '';
+        findInput.value = rule.findRegex || '';
+        alternativesInput.value = parseAlternatives(rule).join('\n');
+
+        editorContent.querySelector('#pp_editor_preview').addEventListener('pointerup', () => {
+            const candidate = normalizeRule({
+                scriptName: nameInput.value,
+                findRegex: findInput.value,
+                alternatives: alternativesInput.value.split('\n').map(value => value.trim()).filter(Boolean),
+            });
+            const chatText = (getContext().chat || [])
+                .filter(message => !message.is_user)
+                .map(message => message.mes || '')
+                .join('\n\n');
+            const preview = previewRule(chatText, candidate);
+            const validationElement = editorContent.querySelector('#pp_editor_validation');
+            const resultsElement = editorContent.querySelector('#pp_editor_preview_results');
+            validationElement.textContent = preview.valid
+                ? `${preview.examples.length} example match${preview.examples.length === 1 ? '' : 'es'} found.`
+                : preview.errors.join(' ');
+            validationElement.classList.toggle('is-valid', preview.valid);
+            validationElement.classList.toggle('is-invalid', !preview.valid);
+            resultsElement.replaceChildren();
+            for (const example of preview.examples) {
+                const card = document.createElement('div');
+                card.className = 'pp-rule-preview-card';
+                const before = document.createElement('div');
+                const after = document.createElement('div');
+                before.textContent = `Before: ${example.before}`;
+                after.textContent = `After: ${example.after}`;
+                card.append(before, after);
+                resultsElement.appendChild(card);
+            }
+        });
         const deleteBtn = editorContent.querySelector('#pp_editor_delete');
         if (deleteBtn) {
             deleteBtn.addEventListener('pointerup', async (e) => {
@@ -1286,17 +1311,23 @@ class RegexNavigator {
             });
         }
         if (await callGenericPopup(editorContent, POPUP_TYPE.CONFIRM, isNew ? 'Create New Rule' : 'Edit Rule', { wide: true, large: true })) {
-            const nameInput = editorContent.querySelector('#pp_editor_name');
-            const findInput = editorContent.querySelector('#pp_editor_find');
-            const replaceInput = editorContent.querySelector('#pp_editor_replace');
             const disabledInput = editorContent.querySelector('#pp_editor_disabled');
             rule.disabled = disabledInput.checked;
             if (!rule.isStatic) {
                 if (!nameInput.value.trim() || !findInput.value.trim()) { window.toastr.error("Rule Name and Find Regex cannot be empty."); this.openRuleEditor(rule.id); return; }
-                try { new RegExp(findInput.value); } catch (e) { window.toastr.error(`Invalid Regex: ${e.message}`); this.openRuleEditor(rule.id); return; }
-                rule.scriptName = nameInput.value;
-                rule.findRegex = findInput.value;
-                rule.replaceString = replaceInput.value;
+                const normalized = normalizeRule({
+                    ...rule,
+                    scriptName: nameInput.value.trim(),
+                    findRegex: findInput.value.trim(),
+                    alternatives: alternativesInput.value.split('\n').map(value => value.trim()).filter(Boolean),
+                });
+                const validation = validateRule(normalized);
+                if (!validation.valid) {
+                    window.toastr.error(validation.errors.join(' '));
+                    this.openRuleEditor(rule.id);
+                    return;
+                }
+                Object.assign(rule, normalized);
             }
             if (isNew && !rule.isStatic) dynamicRules.push(rule);
             
