@@ -81,17 +81,16 @@ Example input to you:
 ## OUTPUT SPECIFICATION
 Your entire response MUST be a single, raw, valid JSON array \`[...] \`. Do not wrap it in markdown fences or add any commentary.
 
-Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, and \`replaceString\`.
+Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, and \`alternatives\`.
 
 1.  **scriptName**: A concise, descriptive name for the rule (e.g., "Slopfix - Fleeting Doubt Expression", "Slopfix - Rapid Heartbeat").
 2.  **findRegex**: A valid JavaScript-compatible regex string.
     -   **Generalize Intelligently**: Capture variable parts like pronouns \`([Hh]is|[Hh]er|[Tt]heir)\`, names, or specific objects with capture groups \`()\`. Example: For "a flicker of X crossed his face", capture "X" and "his".
     -   **Combine Variations**: If the pattern implies variations (e.g., \`graces/touches/crosses\`), use non-capturing groups or character classes like \`(?:graces?|touches|crosses)\`. For verb tenses, consider \`(?:looks?|gazed?|stared?)\`.
     -   **Precision**: Use word boundaries \`\\b\` to avoid matching parts of other words. Ensure the regex accurately targets the intended slop.
-3.  **replaceString**: A string containing **at least \${MIN_ALTERNATIVES_PER_RULE} high-quality, creative, and grammatically correct alternatives**.
-    -   **CRITICAL FORMAT**: The entire string MUST be in the exact format: \`{{random:alt1,alt2,alt3,...,altN}}\`. The examples below show this with spaces, like \`{ {random:...} }\`, to prevent system errors. Your output **MUST** be compact, with no spaces, like \`{{random:...}}\`.
-    -   Alternatives MUST be separated by a **single comma (,)**. Do not use pipes (|) or any other separator.
-    -   Do not add spaces around the commas unless those spaces are intentionally part of an alternative.
+3.  **alternatives**: A JSON array containing **at least \${MIN_ALTERNATIVES_PER_RULE} high-quality, creative, and grammatically correct replacement strings**.
+    -   Each alternative MUST be its own JSON string. Normal punctuation, including commas, is allowed inside an alternative.
+    -   Do not create a \`replaceString\` or a SillyTavern macro. Prose Polisher compiles the array safely.
     -   **Placeholders**: Use \`$1\`, \`$2\`, etc., to re-insert captured groups from your regex. Ensure these fit grammatically into your alternatives.
     -   **Transformative Quality**:
         -   **Avoid Superficial Changes**: Alternatives must be genuinely different.
@@ -107,7 +106,7 @@ Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, an
 {
   "scriptName": "Slopfix - Fleeting Doubt Expression",
   "findRegex": "\\\\b[aA]\\\\s+flicker\\\\s+of\\\\s+([a-zA-Z\\\\s]+?)\\\\s+(?:ignited|passed|cross|crossed|twisted)\\\\s+(?:in|across|through)\\\\s+([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+(?:eyes|face|mind|gut|depths)\\\\b",
-  "replaceString": "{{random:a fleeting look of $1 crossed $2 face,$2 eyes briefly clouded with $1,a momentary shadow of $1 touched $2 features,$2 expression betrayed a flash of $1,$1 briefly surfaced in $2 gaze}}"
+  "alternatives": ["a fleeting look of $1 crossed $2 face", "$2 eyes briefly clouded with $1", "a momentary shadow of $1 touched $2 features", "$2 expression betrayed a flash of $1", "$1 briefly surfaced in $2 gaze"]
 }
 \`\`\`
 
@@ -116,14 +115,14 @@ Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, an
 {
   "scriptName": "Slopfix - Rapid Heartbeat",
   "findRegex": "\\\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+heart\\\\s+(?:pounded|hammered|thudded|fluttered|raced)(?:\\\\s+in\\\\s+\\\\1\\\\s+(?:chest|ribs))?\\\\b",
-  "replaceString": "{{random:a frantic rhythm drummed against $1 ribs,$1 pulse hammered at the base of their throat,$1 chest tightened with heavy thudding,a nervous tremor started beneath $1 breastbone,$1 heartbeat echoed in their ears like war drums}}"
+  "alternatives": ["a frantic rhythm drummed against $1 ribs", "$1 pulse hammered at the base of their throat", "$1 chest tightened with heavy thudding", "a nervous tremor started beneath $1 breastbone", "$1 heartbeat echoed in their ears like war drums"]
 }
 \`\`\`
 *(Note: Ensure you generate at least \${MIN_ALTERNATIVES_PER_RULE} alternatives for each rule in your actual output, even if the examples above show fewer for brevity here.)*
 
 ## CORE PRINCIPLES
--   **High-Quality Alternatives & Strict Formatting are Paramount**: Prioritize generating genuinely transformative and well-written alternatives. If you cannot produce at least \${MIN_ALTERNATIVES_PER_RULE} such alternatives for a pattern, adhering STRICTLY to the specified comma-separated \`{{random:...}}\` format (with no spaces), it is better to omit the rule entirely from your JSON output.
--   **Reject Unsuitable Patterns**: If an input pattern is too generic (e.g., "he said that"), conversational, a common idiom that isn't "slop", or you cannot create \${MIN_ALTERNATIVES_PER_RULE}+ excellent alternatives in the **exact correct format**, **DO NOT** create a rule for it. Simply omit its object from the final JSON array.
+-   **High-Quality Alternatives & Valid JSON are Paramount**: Prioritize genuinely transformative and well-written alternatives. If you cannot produce at least \${MIN_ALTERNATIVES_PER_RULE} suitable replacements, omit the rule.
+-   **Reject Unsuitable Patterns**: If an input pattern is too generic (e.g., "he said that"), conversational, a common idiom that isn't "slop", or cannot support \${MIN_ALTERNATIVES_PER_RULE}+ excellent alternatives, omit it from the final JSON array.
 -   **Focus on Narrative Prose**: The rules are intended for descriptive and narrative text.
 -   **Final Output**: If you reject all candidates, your entire response must be an empty array: \`[]\`.
 
