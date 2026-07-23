@@ -1,132 +1,138 @@
-// prompts.js
+const REVIEW_PROMPT = `You are reviewing phrases detected as potentially repetitive narrative prose.
+
+Approve a candidate only when:
+- it is a coherent phrase rather than a fragment, name, status label, code, or metadata;
+- the supplied enhanced_context is a real sentence containing the phrase;
+- the phrase is specific enough to match safely;
+- replacing only the matched span could preserve the sentence's grammar and meaning.
+
+Treat enhanced_context as evidence. Never invent, rewrite, or embellish context.
+
+Return only a JSON array. Each item must contain:
+- "candidate": the candidate exactly as supplied;
+- "valid_for_regex": true or false;
+- "reason": required when false.
+
+Reject generic scaffolding such as "he said", context-dependent fragments, mixed grammatical forms, and phrases whose replacement would require guessing an emotion, motive, referent, or surrounding syntax.`;
+
+export const DEFAULT_RULE_GENERATION_PROMPT = `You are a conservative line editor and JavaScript regular-expression specialist. Build replacement rules for genuinely repetitive narrative wording.
+
+The governing principle is:
+
+REPETITION IS BETTER THAN A REPLACEMENT THAT CHANGES MEANING OR BREAKS GRAMMAR.
+
+## INPUT
+
+Candidates are supplied as JSON objects containing:
+- "candidate": the detected phrase;
+- "enhanced_context": one or more real sentences copied from the chat;
+- optionally "score": repetition evidence.
+
+Use only that evidence. Do not invent a cleaner example or infer an unstated emotion, motive, relationship, action, or cause.
+
+Candidates:
+{{CANDIDATES}}
+
+## WHEN TO OMIT A CANDIDATE
+
+Return no rule for a candidate when:
+- its grammatical role changes between examples;
+- its meaning depends on unstated context;
+- it mixes different actions, emotions, tenses, subjects, or points of view;
+- a safe regex would be so broad that it matches ordinary prose;
+- at least \${MIN_ALTERNATIVES_PER_RULE} faithful alternatives cannot be written;
+- any alternative needs words outside the matched span to make sense.
+
+## OUTPUT
+
+Return only one raw JSON array. Do not use markdown fences or commentary.
+
+Each rule must contain:
+
+1. "scriptName": a concise descriptive name.
+
+2. "findRegex": a JavaScript-compatible regex string.
+   - Match the complete syntactic unit being replaced.
+   - Use word boundaries where appropriate.
+   - Capture every variable fact that replacements must preserve.
+   - Use noncapturing groups for structural alternatives.
+   - Do not capture a possessive and then refer to it as a subject pronoun.
+   - Do not consume punctuation unless every replacement deliberately replaces it.
+   - Do not combine phrases merely because they imply similar emotions.
+
+3. "alternatives": at least \${MIN_ALTERNATIVES_PER_RULE} distinct JSON strings.
+   - Do not return replaceString or a SillyTavern macro.
+   - Normal punctuation, including commas, is allowed.
+   - Use $1, $2, and so on only for capture groups that exist.
+   - Preserve the matched span's syntactic role. A predicate stays a predicate; a modifier stays a modifier; a complete clause stays a complete clause.
+   - Preserve subject, object, agency, tense, person, number, point of view, negation, certainty, intensity, and temporal order.
+   - Preserve all concrete facts and all ambiguity.
+   - Do not add emotions, motives, metaphors, bodily reactions, sensory details, dialogue implications, or causal claims.
+   - Do not turn visible behavior into knowledge of an internal state.
+   - Do not intensify or soften. "Looked" cannot become "glared"; "uneasy" cannot become "terrified."
+   - Do not add a subject if adjacent text already supplies it.
+   - Do not add terminal punctuation unless findRegex consumes terminal punctuation.
+   - Do not rely on a particular word immediately before or after the match.
+   - Prefer restrained, invisible editing over conspicuous prose.
+
+4. "semanticInvariant": one precise sentence stating what every replacement preserves and what it must not infer.
+
+5. "testCases": at least three complete sentences copied verbatim from the supplied enhanced_context values.
+   - Every sentence must contain text matched by findRegex.
+   - Vary sentence position, punctuation, and any captured pronouns or possessives supported by the pattern.
+   - These test grammar compatibility, not creativity.
+
+6. "risk": "low", "medium", or "high".
+   - low: narrow wording substitution with stable grammar and meaning.
+   - medium: grammar is stable but implication or tone requires care.
+   - high: meaning, referents, syntax, or point of view are context-sensitive.
+   - Omit high-risk rules from the returned array.
+
+## REQUIRED COMPATIBILITY CHECK
+
+Before returning a rule, substitute every alternative into every test case. Omit the rule if any combination:
+- is ungrammatical;
+- duplicates or removes a subject, object, verb, preposition, negation, or punctuation mark;
+- changes tense, person, number, point of view, agency, certainty, intensity, or meaning;
+- leaves $1, $2, $&, or another capture token unresolved;
+- adds information absent from the matched text;
+- sounds correct only in the original example.
+
+## SAFE EXAMPLE
+
+Input phrase: "nodded slowly"
+
+Safe rule shape:
+{
+  "scriptName": "Slopfix - Slow Nod",
+  "findRegex": "\\\\bnodded\\\\s+slowly\\\\b",
+  "alternatives": ["gave a slow nod", "inclined their head in a measured nod"],
+  "semanticInvariant": "The subject performs a slow nod; no agreement, emotion, or motive is inferred.",
+  "testCases": [
+    "Mara nodded slowly before returning to the ledger.",
+    "After a moment, he nodded slowly.",
+    "They nodded slowly, still watching the door."
+  ],
+  "risk": "low"
+}
+
+The example shows structure only. Actual rules still require at least \${MIN_ALTERNATIVES_PER_RULE} alternatives.
+
+If every candidate is unsafe, return [].`;
 
 export const prompts = {
-
-    // Prompt for the initial pre-screening of candidates by the Twins model
-    callTwinsForSlopPreScreening: `You are an expert natural language processing (NLP) analyst and a discerning literary critic. Your task is to evaluate a list of potential "slop" phrases or patterns identified by an automated system. For each candidate, you must determine if it is:
-1.  A coherent, grammatically sensible phrase/pattern.
-2.  Something that can plausibly be fixed or enhanced with alternative phrasing.
-3.  Not a random fragment, a character name, or a piece of code/metadata.
-
-For each *valid* candidate, you will provide an "enhanced context" - a representative full sentence (or a couple of sentences) where this phrase or a similar one might occur naturally in a story, incorporating it smoothly. This helps a later system understand how to generate alternatives.
-
-For each *invalid* candidate, you will briefly explain why it's invalid.
-
-Output a JSON array of objects. Each object must have:
-- \`candidate\`: The original phrase/pattern you are evaluating.
-- \`valid_for_regex\`: A boolean (true/false).
-- If \`valid_for_regex\` is \`true\`:
-    - \`enhanced_context\`: A string, representing a full sentence or two where the \`candidate\` would naturally fit. Ensure this context feels organic and helpful.
-- If \`valid_for_regex\` is \`false\`:
-    - \`reason\`: A brief string explaining why it's not valid (e.g., "Too short", "Nonsensical fragment", "Metadata").
-
-Example input:
-- "a flicker of doubt crossed his face"
-- "he looked at her"
-- "the"
-- "Status: Composed"
-
-Example output:
-\`\`\`json
-[
-  {
-    "candidate": "a flicker of doubt crossed his face",
-    "valid_for_regex": true,
-    "enhanced_context": "When she revealed her true intentions, a flicker of doubt crossed his face, a momentary crack in his usually stoic demeanor."
-  },
-  {
-    "candidate": "he looked at her",
-    "valid_for_regex": true,
-    "enhanced_context": "He looked at her across the crowded room, a silent question passing between their gazes."
-  },
-  {
-    "candidate": "the",
-    "valid_for_regex": false,
-    "reason": "Too short and generic to be a slop candidate for regex."
-  },
-  {
-    "candidate": "Status: Composed",
-    "valid_for_regex": false,
-    "reason": "Likely metadata or a list item, not natural prose."
-  }
-]
-\`\`\`
-Strictly adhere to the JSON format. Do not add any other text.`,
-
-    // Prompt for the single-gremlin (Writer/Editor/etc.) regex generation
-    generateAndSaveDynamicRulesWithSingleGremlin: `You are an expert literary editor and a master of Regex, tasked with elevating prose by eliminating repetitive phrasing ("slop"). Your goal is to generate high-quality, transformative alternatives for given text patterns.
-
-## TASK
-Analyze the provided list of repetitive phrases/patterns. For each viable pattern, generate a corresponding JSON object for a find-and-replace rule. The input will provide the candidate phrase and an 'enhanced_context' which is a representative sentence where the phrase might occur. Use this context to understand the phrase's typical usage and implied writing style.
-
-## INPUT FORMAT
-The input is a list of objects, each with:
-- \`candidate\`: The repetitive phrase or pattern.
-- \`enhanced_context\`: A sentence or two showing the candidate in a typical usage.
-
-Example input to you:
-\`\`\`json
-[
-  {
-    "candidate": "a flicker of doubt crossed his face",
-    "enhanced_context": "When she revealed her true intentions, a flicker of doubt crossed his face, a momentary crack in his usually stoic demeanor."
-  },
-  {
-    "candidate": "her heart pounded in her chest",
-    "enhanced_context": "As the footsteps drew closer, her heart pounded in her chest, a frantic drum against her ribs."
-  }
-]
-\`\`\`
-
-## OUTPUT SPECIFICATION
-Your entire response MUST be a single, raw, valid JSON array \`[...] \`. Do not wrap it in markdown fences or add any commentary.
-
-Each object in the array must have three keys: \`scriptName\`, \`findRegex\`, and \`replaceString\`.
-
-1.  **scriptName**: A concise, descriptive name for the rule (e.g., "Slopfix - Fleeting Doubt Expression", "Slopfix - Rapid Heartbeat").
-2.  **findRegex**: A valid JavaScript-compatible regex string.
-    -   **Generalize Intelligently**: Capture variable parts like pronouns \`([Hh]is|[Hh]er|[Tt]heir)\`, names, or specific objects with capture groups \`()\`. Example: For "a flicker of X crossed his face", capture "X" and "his".
-    -   **Combine Variations**: If the pattern implies variations (e.g., \`graces/touches/crosses\`), use non-capturing groups or character classes like \`(?:graces?|touches|crosses)\`. For verb tenses, consider \`(?:looks?|gazed?|stared?)\`.
-    -   **Precision**: Use word boundaries \`\\b\` to avoid matching parts of other words. Ensure the regex accurately targets the intended slop.
-3.  **replaceString**: A string containing **at least \${MIN_ALTERNATIVES_PER_RULE} high-quality, creative, and grammatically correct alternatives**.
-    -   **CRITICAL FORMAT**: The entire string MUST be in the exact format: \`{{random:alt1,alt2,alt3,...,altN}}\`. The examples below show this with spaces, like \`{ {random:...} }\`, to prevent system errors. Your output **MUST** be compact, with no spaces, like \`{{random:...}}\`.
-    -   Alternatives MUST be separated by a **single comma (,)**. Do not use pipes (|) or any other separator.
-    -   Do not add spaces around the commas unless those spaces are intentionally part of an alternative.
-    -   **Placeholders**: Use \`$1\`, \`$2\`, etc., to re-insert captured groups from your regex. Ensure these fit grammatically into your alternatives.
-    -   **Transformative Quality**:
-        -   **Avoid Superficial Changes**: Alternatives must be genuinely different.
-        -   **Evocative & Engaging**: Aim for vivid, impactful, and fresh phrasing.
-        -   **Maintain Grammatical Structure**: Alternatives, when placeholders are filled, must fit seamlessly.
-        -   **Infer Style**: Match the tone and style implied by the 'enhanced_context'.
-        -   **Literary Merit**: Each alternative should be of high literary quality.
-
-## FULL OUTPUT EXAMPLES (ASSUMING MIN_ALTERNATIVES_PER_RULE IS 5):
-
-**Example 1 (Based on "a flicker of doubt crossed his face"):**
-\`\`\`json
-{
-  "scriptName": "Slopfix - Fleeting Doubt Expression",
-  "findRegex": "\\\\b[aA]\\\\s+flicker\\\\s+of\\\\s+([a-zA-Z\\\\s]+?)\\\\s+(?:ignited|passed|cross|crossed|twisted)\\\\s+(?:in|across|through)\\\\s+([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+(?:eyes|face|mind|gut|depths)\\\\b",
-  "replaceString": "{{random:a fleeting look of $1 crossed $2 face,$2 eyes briefly clouded with $1,a momentary shadow of $1 touched $2 features,$2 expression betrayed a flash of $1,$1 briefly surfaced in $2 gaze}}"
-}
-\`\`\`
-
-**Example 2 (Based on "her heart pounded in her chest"):**
-\`\`\`json
-{
-  "scriptName": "Slopfix - Rapid Heartbeat",
-  "findRegex": "\\\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+heart\\\\s+(?:pounded|hammered|thudded|fluttered|raced)(?:\\\\s+in\\\\s+\\\\1\\\\s+(?:chest|ribs))?\\\\b",
-  "replaceString": "{{random:a frantic rhythm drummed against $1 ribs,$1 pulse hammered at the base of their throat,$1 chest tightened with heavy thudding,a nervous tremor started beneath $1 breastbone,$1 heartbeat echoed in their ears like war drums}}"
-}
-\`\`\`
-*(Note: Ensure you generate at least \${MIN_ALTERNATIVES_PER_RULE} alternatives for each rule in your actual output, even if the examples above show fewer for brevity here.)*
-
-## CORE PRINCIPLES
--   **High-Quality Alternatives & Strict Formatting are Paramount**: Prioritize generating genuinely transformative and well-written alternatives. If you cannot produce at least \${MIN_ALTERNATIVES_PER_RULE} such alternatives for a pattern, adhering STRICTLY to the specified comma-separated \`{{random:...}}\` format (with no spaces), it is better to omit the rule entirely from your JSON output.
--   **Reject Unsuitable Patterns**: If an input pattern is too generic (e.g., "he said that"), conversational, a common idiom that isn't "slop", or you cannot create \${MIN_ALTERNATIVES_PER_RULE}+ excellent alternatives in the **exact correct format**, **DO NOT** create a rule for it. Simply omit its object from the final JSON array.
--   **Focus on Narrative Prose**: The rules are intended for descriptive and narrative text.
--   **Final Output**: If you reject all candidates, your entire response must be an empty array: \`[]\`.
-
-Your output will be parsed directly by \`JSON.parse()\`. It must be perfect.`,
-
+    reviewSlopCandidates: REVIEW_PROMPT,
+    generateAndSaveDynamicRules: DEFAULT_RULE_GENERATION_PROMPT,
 };
+
+export function buildRuleGenerationPrompt(customPrompt, candidates, minimumAlternatives) {
+    const template = (customPrompt?.trim() || DEFAULT_RULE_GENERATION_PROMPT).replace(
+        /\$\{MIN_ALTERNATIVES_PER_RULE\}/g,
+        String(minimumAlternatives),
+    );
+    const candidatePayload = JSON.stringify(candidates, null, 2);
+
+    return template.includes('{{CANDIDATES}}')
+        ? template.replaceAll('{{CANDIDATES}}', candidatePayload)
+        : `${template}\n\nCandidates:\n${candidatePayload}`;
+}

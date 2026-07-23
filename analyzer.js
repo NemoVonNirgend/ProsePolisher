@@ -1,7 +1,7 @@
-import { extension_settings, getContext } from '../../../extensions.js';
-import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
-import { applyGremlinEnvironment, executeGen } from './projectgremlin.js'; // Ensure these are correctly imported
-import { prompts } from './prompts.js'; // <-- IMPORT THE NEW PROMPTS FILE
+import { getContext } from '../../../extensions.js';
+import { generateText } from './generation.js';
+import { normalizeRule, validateGeneratedRule } from './rule-utils.js';
+import { buildRuleGenerationPrompt, prompts } from './prompts.js';
 
 // Import all new and existing data files
 import { commonWords } from './common_words.js';
@@ -12,7 +12,7 @@ const LOG_PREFIX = `[ProsePolisher:Analyzer]`;
 
 // Constants
 const BATCH_SIZE = 15; // Number of final candidates to send to AI for regex generation
-const TWINS_PRESCREEN_BATCH_SIZE = 50; // Max number of candidates to send to Twins for pre-screening
+const PRESCREEN_BATCH_SIZE = 50; // Maximum candidates sent for AI review
 const CANDIDATE_LIMIT_FOR_ANALYSIS = 2000;
 const NGRAM_MIN = 3; // The minimum n-gram size is fundamental to the logic.
 const MIN_ALTERNATIVES_PER_RULE = 15;
@@ -173,7 +173,18 @@ export class Analyzer {
                         continue;
                     }
 
-                    const currentData = this.ngramFrequencies.get(lemmatizedNgram) || { count: 0, score: 0, lastSeenMessageIndex: this.totalAiMessagesProcessed, original: originalNgram, contextSentence: sentence };
+                    const currentData = this.ngramFrequencies.get(lemmatizedNgram) || {
+                        count: 0,
+                        score: 0,
+                        lastSeenMessageIndex: this.totalAiMessagesProcessed,
+                        original: originalNgram,
+                        contextSentence: sentence,
+                        contexts: [],
+                    };
+                    const contexts = [
+                        ...(currentData.contexts || [currentData.contextSentence]).filter(Boolean),
+                    ];
+                    if (!contexts.includes(sentence)) contexts.push(sentence);
 
                     let scoreIncrement = 1.0;
                     
@@ -192,8 +203,9 @@ export class Analyzer {
                         count: newCount,
                         score: newScore,
                         lastSeenMessageIndex: this.totalAiMessagesProcessed,
-                        original: originalNgram, 
+                        original: originalNgram,
                         contextSentence: sentence,
+                        contexts: contexts.slice(-5),
                     });
 
                     if (newScore >= SLOP_THRESHOLD && currentData.score < SLOP_THRESHOLD) { 
@@ -372,150 +384,121 @@ export class Analyzer {
         };
     }
 
-    async callTwinsForSlopPreScreening(rawCandidates, compiledRegexes) {
-        if (!rawCandidates || rawCandidates.length === 0) return [];
+    async reviewSlopCandidates(candidates) {
+        if (!candidates || candidates.length === 0) return [];
 
-        // The large prompt is now imported and used directly
-        const systemPrompt = prompts.callTwinsForSlopPreScreening;
-        const userPrompt = `Evaluate the following potential slop phrases/patterns:\n- ${rawCandidates.join('\n- ')}\n\nProvide the JSON array of evaluations now.`;
+        const systemPrompt = prompts.reviewSlopCandidates;
+        const userPrompt = `Evaluate these candidates using only their supplied real chat context:\n${JSON.stringify(candidates, null, 2)}\n\nProvide the JSON array of evaluations now.`;
 
         try {
-            this.toastr.info("Prose Polisher: Twins are pre-screening slop candidates...", "Project Gremlin", { timeOut: 7000 });
-            if (!await applyGremlinEnvironment('twins')) {
-                throw new Error("Failed to configure environment for Twin Gremlins pre-screening.");
-            }
-
-            const rawResponse = await executeGen(`${systemPrompt}\n\n${userPrompt}`);
+            this.toastr.info("Prose Polisher: Reviewing slop candidates...", "Prose Polisher", { timeOut: 7000 });
+            const rawResponse = await generateText(`${systemPrompt}\n\n${userPrompt}`);
             if (!rawResponse || !rawResponse.trim()) {
-                console.warn(`${LOG_PREFIX} Twins returned an empty response during pre-screening.`);
-                return rawCandidates.map(c => ({ candidate: c, enhanced_context: c })); 
+                console.warn(`${LOG_PREFIX} Candidate review returned an empty response.`);
+                return candidates;
             }
 
-            let twinResults = [];
+            let reviewResults = [];
             try {
                 const jsonMatch = rawResponse.match(/```json\s*([\s\S]*?)\s*```|(\[[\s\S]*?\])/s);
                 if (jsonMatch) {
                     const jsonString = jsonMatch[1] || jsonMatch[2];
                     const parsedData = JSON.parse(jsonString);
-                    twinResults = Array.isArray(parsedData) ? parsedData : [parsedData];
+                    reviewResults = Array.isArray(parsedData) ? parsedData : [parsedData];
                 } else {
                      const parsedData = JSON.parse(rawResponse);
-                     twinResults = Array.isArray(parsedData) ? parsedData : [parsedData];
+                     reviewResults = Array.isArray(parsedData) ? parsedData : [parsedData];
                 }
             } catch (e) {
-                console.error(`${LOG_PREFIX} Failed to parse JSON from Twins' pre-screening response. Error: ${e.message}. Raw response:`, rawResponse);
-                this.toastr.error("Prose Polisher: Twins' pre-screening returned invalid data. See console.");
-                return rawCandidates.map(c => ({ candidate: c, enhanced_context: c })); 
+                console.error(`${LOG_PREFIX} Failed to parse JSON from candidate-review response. Error: ${e.message}. Raw response:`, rawResponse);
+                this.toastr.error("Prose Polisher: Candidate review returned invalid data. See console.");
+                return candidates;
             }
 
-            const validCandidates = twinResults.filter(r => r.valid_for_regex && r.candidate && r.enhanced_context).map(r => ({
-                candidate: r.candidate,
-                enhanced_context: r.enhanced_context,
-            }));
+            const sourceByCandidate = new Map(candidates.map(candidate => [candidate.candidate, candidate]));
+            const validCandidates = reviewResults
+                .filter(result => result.valid_for_regex && sourceByCandidate.has(result.candidate))
+                .map(result => sourceByCandidate.get(result.candidate));
             
-            const rejectedCount = twinResults.length - validCandidates.length;
+            const rejectedCount = reviewResults.length - validCandidates.length;
             if (rejectedCount > 0) {
-                 console.log(`${LOG_PREFIX} Twins rejected ${rejectedCount} slop candidates during pre-screening.`);
+                 console.log(`${LOG_PREFIX} Candidate review rejected ${rejectedCount} slop candidates during pre-screening.`);
             }
 
-            this.toastr.success(`Prose Polisher: Twins pre-screened ${rawCandidates.length} candidates. ${validCandidates.length} approved.`, "Project Gremlin", { timeOut: 4000 });
+            this.toastr.success(`Prose Polisher reviewed ${candidates.length} candidates. ${validCandidates.length} approved.`, "Prose Polisher", { timeOut: 4000 });
             return validCandidates;
 
         } catch (error) {
-            console.error(`${LOG_PREFIX} Error during Twins pre-screening:`, error);
-            this.toastr.error(`Prose Polisher: Twins pre-screening failed. ${error.message}. Proceeding with raw candidates.`, "Project Gremlin");
-            return rawCandidates.map(c => ({ candidate: c, enhanced_context: c })); 
+            console.error(`${LOG_PREFIX} Error during candidate review:`, error);
+            this.toastr.error(`Candidate review failed: ${error.message}. Proceeding with raw candidates.`, "Prose Polisher");
+            return candidates;
         }
     }
 
-    async generateAndSaveDynamicRulesWithSingleGremlin(candidatesForGeneration, dynamicRulesRef, gremlinRoleForGeneration) {
-        if (typeof window.isAppReady === 'undefined' || !window.isAppReady) {
-            this.toastr.info("SillyTavern is still loading, please wait to generate rules.");
+    async generateAndSaveDynamicRules(candidatesForGeneration, dynamicRulesRef) {
+        if (!window.isAppReady) {
+            this.toastr.info('SillyTavern is still loading, please wait to generate rules.');
             return 0;
         }
-        
-        const roleForGenUpper = gremlinRoleForGeneration.charAt(0).toUpperCase() + gremlinRoleForGeneration.slice(1);
+
+        const fullPrompt = buildRuleGenerationPrompt(
+            this.settings.regexGenerationInstructions,
+            candidatesForGeneration,
+            MIN_ALTERNATIVES_PER_RULE,
+        );
+
         let addedCount = 0;
-
-        // Get the prompt template from the imported file
-        const systemPromptTemplate = prompts.generateAndSaveDynamicRulesWithSingleGremlin;
-        // Inject the dynamic value. Using a regex with 'g' flag ensures all instances are replaced.
-        const systemPrompt = systemPromptTemplate.replace(/\$\{MIN_ALTERNATIVES_PER_RULE\}/g, MIN_ALTERNATIVES_PER_RULE);
-
-        const formattedCandidates = candidatesForGeneration.map(c => `- ${JSON.stringify(c)}`).join('\n');
-        const userPrompt = `Generate the JSON array of regex rules for the following candidates:\n${formattedCandidates}\n\nFollow all instructions precisely.`;
-        const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
-
         try {
-            if (gremlinRoleForGeneration !== 'current') {
-                this.toastr.info(`Prose Polisher: Configuring '${roleForGenUpper}' environment for rule generation...`, "Project Gremlin", { timeOut: 7000 });
-                if (!await applyGremlinEnvironment(gremlinRoleForGeneration)) {
-                    throw new Error(`Failed to configure environment for rule generation using ${roleForGenUpper} Gremlin's settings.`);
-                }
-                this.toastr.info(`Prose Polisher: Generating regex rules via AI (${roleForGenUpper})...`, "Project Gremlin", { timeOut: 25000 });
-            } else {
-                this.toastr.info(`Prose Polisher: Generating regex rules via AI (using current connection)...`, "Project Gremlin", { timeOut: 25000 });
-            }
-            const rawResponse = await executeGen(fullPrompt);
-
-            if (!rawResponse || !rawResponse.trim()) {
-                this.toastr.warning(`Prose Polisher: ${roleForGenUpper} returned no data for rule generation.`);
+            this.toastr.info(
+                `Generating replacement rules for ${candidatesForGeneration.length} candidates using the current connection...`,
+                'Prose Polisher',
+                { timeOut: 25000 },
+            );
+            const rawResponse = await generateText(fullPrompt);
+            if (!rawResponse?.trim()) {
+                this.toastr.warning('Rule generation returned no data.');
                 return 0;
             }
 
-            let newRules = [];
+            let generatedRules;
             try {
                 const jsonMatch = rawResponse.match(/```json\s*([\s\S]*?)\s*```|(\[[\s\S]*?\])/s);
-                if (jsonMatch) {
-                    const jsonString = jsonMatch[1] || jsonMatch[2];
-                    const parsedData = JSON.parse(jsonString);
-                    newRules = Array.isArray(parsedData) ? parsedData : [parsedData];
-                } else {
-                     const parsedData = JSON.parse(rawResponse);
-                     newRules = Array.isArray(parsedData) ? parsedData : [parsedData];
-                }
-            } catch (e) {
-                console.error(`${LOG_PREFIX} Failed to parse JSON from ${roleForGenUpper}'s response. Error: ${e.message}. Raw response:`, rawResponse);
-                this.toastr.error(`Prose Polisher: ${roleForGenUpper}'s rule generation returned invalid data. See console.`);
+                const parsed = JSON.parse(jsonMatch ? (jsonMatch[1] || jsonMatch[2]) : rawResponse);
+                generatedRules = Array.isArray(parsed) ? parsed : [parsed];
+            } catch (error) {
+                console.error(`${LOG_PREFIX} Failed to parse generated rules:`, error, rawResponse);
+                this.toastr.error('Rule generation returned invalid JSON. See the console.');
                 return 0;
             }
 
-            for (const rule of newRules) {
-                if (rule && rule.scriptName && rule.findRegex && rule.replaceString) {
-                    try { new RegExp(rule.findRegex); } catch (e) { console.warn(`${LOG_PREFIX} AI generated an invalid regex for rule '${rule.scriptName}', skipping: ${e.message}`); continue; }
-                    
-                    let alternativesArray = [];
-                    let finalReplaceString = '';
-
-                    // Sanitize first to handle `{ {` cases
-                    let processedString = rule.replaceString.replace(/\{\s*\{/g, '{{').replace(/\}\s*\}/g, '}}').replace(/\{\{\s*random:/, '{{random:');
-
-                    const alternativesMatch = processedString.match(/^\{\{random:([\s\S]+?)\}\}$/);
-
-                    if (alternativesMatch && alternativesMatch[1]) {
-                        // Case 1: The wrapper exists, parse from it.
-                        alternativesArray = alternativesMatch[1].split(',').map(s => s.trim()).filter(s => s);
-                        finalReplaceString = processedString;
-                    } else {
-                        // Case 2: The wrapper is missing. Assume the whole string is the list.
-                        const rawAlternatives = processedString.replace(/^"|"$/g, '');
-                        alternativesArray = rawAlternatives.split(',').map(s => s.trim()).filter(s => s);
-                        finalReplaceString = `{{random:${alternativesArray.join(',')}}}`;
-                    }
-
-                    if (alternativesArray.length < MIN_ALTERNATIVES_PER_RULE) {
-                        console.warn(`${LOG_PREFIX} AI rule '${rule.scriptName}' has insufficient alternatives (found ${alternativesArray.length}, need ${MIN_ALTERNATIVES_PER_RULE}) or malformed replaceString. Original: "${rule.replaceString}", Skipping.`);
-                        continue;
-                    }
-
-                    rule.id = `DYN_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-                    rule.disabled = rule.disabled ?? false;
-                    rule.isStatic = false;
-                    rule.isNew = true;
-                    rule.replaceString = finalReplaceString; // Use the correctly formatted string
-                    dynamicRulesRef.push(rule);
-                    addedCount++;
+            for (const candidateRule of generatedRules) {
+                if (!candidateRule?.scriptName || !candidateRule?.findRegex ||
+                    (!candidateRule?.alternatives && !candidateRule?.replaceString)) {
+                    continue;
                 }
+
+                const rule = normalizeRule(candidateRule);
+                const groundedContexts = candidatesForGeneration.flatMap(candidate =>
+                    Array.isArray(candidate.enhanced_context)
+                        ? candidate.enhanced_context
+                        : [candidate.enhanced_context],
+                ).filter(Boolean);
+                const validation = validateGeneratedRule(
+                    rule,
+                    MIN_ALTERNATIVES_PER_RULE,
+                    groundedContexts,
+                );
+                if (!validation.valid) {
+                    console.warn(`${LOG_PREFIX} Rejected generated rule '${rule.scriptName}':`, validation.errors);
+                    continue;
+                }
+
+                rule.id = `DYN_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+                rule.disabled = !this.settings.autoActivateGeneratedRules;
+                rule.isStatic = false;
+                rule.isNew = true;
+                dynamicRulesRef.push(rule);
+                addedCount++;
             }
 
             if (addedCount > 0) {
@@ -528,194 +511,13 @@ export class Analyzer {
                 }
             }
         } catch (error) {
-            console.error(`${LOG_PREFIX} Error during ${roleForGenUpper}'s dynamic rule generation:`, error);
-            this.toastr.error(`Prose Polisher: ${roleForGenUpper}'s rule generation failed. ${error.message}`);
-        } finally {
-            console.log(`${LOG_PREFIX} Single Gremlin rule generation finished. Added ${addedCount} rules.`);
+            console.error(`${LOG_PREFIX} Dynamic rule generation failed:`, error);
+            this.toastr.error(`Rule generation failed: ${error.message}`);
         }
+
+        console.log(`${LOG_PREFIX} Rule generation finished. Added ${addedCount} rules.`);
         return addedCount;
     }
-
-    async generateRulesIterativelyWithTwins(candidatesForGeneration, dynamicRulesRef, numCycles) {
-        if (!candidatesForGeneration || candidatesForGeneration.length === 0) return 0;
-        let addedCount = 0;
-        this.toastr.info(`Prose Polisher: Starting Iterative Twins rule generation (${numCycles} cycle(s))...`, "Project Gremlin");
-
-        for (const candidateData of candidatesForGeneration) {
-            let currentFindRegex = null;
-            let currentAlternatives = []; 
-            let lastValidOutput = {}; 
-
-            try {
-                if (!await applyGremlinEnvironment('twins')) {
-                    throw new Error("Failed to configure environment for Twin Gremlins (Iterative Regex).");
-                }
-
-                for (let cycle = 1; cycle <= numCycles; cycle++) {
-                    if (this.isProcessingAiRules === false) { console.warn("Rule processing aborted by user/system."); return addedCount; }
-
-                    this.toastr.info(`Regex Gen: Candidate "${candidateData.candidate.substring(0,20)}..." - Cycle ${cycle}/${numCycles} (Vex)...`, "Project Gremlin", { timeOut: 12000 });
-                    let vexPrompt = this.constructTwinIterativePrompt('vex', cycle, numCycles, candidateData, currentFindRegex, currentAlternatives, lastValidOutput.notes_for_vax);
-                    let vexRawResponse = await executeGen(vexPrompt);
-                    let vexOutput = this.parseTwinResponse(vexRawResponse, 'Vex');
-                    lastValidOutput = {...lastValidOutput, ...vexOutput}; 
-                    if (vexOutput.findRegex) currentFindRegex = vexOutput.findRegex;
-                    if (Array.isArray(vexOutput.alternatives)) currentAlternatives = vexOutput.alternatives;
-                    
-                    if (this.isProcessingAiRules === false) { console.warn("Rule processing aborted by user/system."); return addedCount; }
-
-                    this.toastr.info(`Regex Gen: Candidate "${candidateData.candidate.substring(0,20)}..." - Cycle ${cycle}/${numCycles} (Vax)...`, "Project Gremlin", { timeOut: 12000 });
-                    let vaxPrompt = this.constructTwinIterativePrompt('vax', cycle, numCycles, candidateData, currentFindRegex, currentAlternatives, lastValidOutput.notes_for_vex);
-                    let vaxRawResponse = await executeGen(vaxPrompt);
-                    let vaxOutput = this.parseTwinResponse(vaxRawResponse, 'Vax');
-                    lastValidOutput = {...lastValidOutput, ...vaxOutput};
-                    if (vaxOutput.findRegex) currentFindRegex = vaxOutput.findRegex;
-                    if (Array.isArray(vaxOutput.alternatives)) currentAlternatives = vaxOutput.alternatives;
-                    
-                    if (cycle === numCycles) { 
-                        if (vaxOutput.scriptName) lastValidOutput.scriptName = vaxOutput.scriptName;
-                        if (vaxOutput.replaceString) lastValidOutput.replaceString = vaxOutput.replaceString; // Vax should be creating this in the correct format on final turn
-                    }
-
-                    if (this.isProcessingAiRules === false) { console.warn("Rule processing aborted by user/system."); return addedCount; }
-                }
-
-                // Validation for final rule from iterative twins
-                if (lastValidOutput.scriptName && lastValidOutput.findRegex && lastValidOutput.replaceString) {
-                    try { new RegExp(lastValidOutput.findRegex); }
-                    catch (e) { console.warn(`${LOG_PREFIX} Iterative Twins produced invalid regex for '${lastValidOutput.scriptName}', skipping: ${e.message}`); continue; }
-
-                    let alternativesArray = [];
-                    let finalReplaceString = '';
-
-                    // Sanitize first to handle `{ {` cases
-                    let processedString = lastValidOutput.replaceString.replace(/\{\s*\{/g, '{{').replace(/\}\s*\}/g, '}}').replace(/\{\{\s*random:/, '{{random:');
-                    const alternativesMatch = processedString.match(/^\{\{random:([\s\S]+?)\}\}$/);
-
-                    if (alternativesMatch && alternativesMatch[1]) {
-                        alternativesArray = alternativesMatch[1].split(',').map(s => s.trim()).filter(s => s);
-                        finalReplaceString = processedString;
-                    } else {
-                        const rawAlternatives = processedString.replace(/^"|"$/g, '');
-                        alternativesArray = rawAlternatives.split(',').map(s => s.trim()).filter(s => s);
-                        finalReplaceString = `{{random:${alternativesArray.join(',')}}}`;
-                    }
-
-                    if (alternativesArray.length < MIN_ALTERNATIVES_PER_RULE) {
-                        console.warn(`${LOG_PREFIX} Iterative Twins rule '${lastValidOutput.scriptName}' has insufficient alternatives (found ${alternativesArray.length}, need ${MIN_ALTERNATIVES_PER_RULE}) or malformed replaceString. Original: "${lastValidOutput.replaceString}", Skipping.`);
-                        continue;
-                    }
-
-                    const newRule = {
-                        id: `DYN_TWIN_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-                        scriptName: lastValidOutput.scriptName,
-                        findRegex: lastValidOutput.findRegex,
-                        replaceString: finalReplaceString,
-                        disabled: false,
-                        isStatic: false,
-                        isNew: true,
-                    };
-                    dynamicRulesRef.push(newRule);
-                    addedCount++;
-                    console.log(`${LOG_PREFIX} Iterative Twins successfully generated rule: ${newRule.scriptName}`);
-                } else {
-                    console.warn(`${LOG_PREFIX} Iterative Twins failed to produce a complete rule for candidate: ${candidateData.candidate}. Final state:`, lastValidOutput);
-                }
-
-            } catch (error) {
-                console.error(`${LOG_PREFIX} Error during iterative twin generation for candidate ${candidateData.candidate}:`, error);
-                this.toastr.error(`Error with iterative regex for ${candidateData.candidate.substring(0,20)}... See console.`);
-            }
-        } 
-
-        if (addedCount > 0) {
-            this.settings.dynamicRules = dynamicRulesRef;
-            this.saveSettingsDebounced();
-            if (this.updateGlobalRegexArrayCallback) {
-                await this.updateGlobalRegexArrayCallback();
-            } else {
-                this.compileActiveRules();
-            }
-        }
-        this.toastr.success(`Iterative Twins rule generation finished. Added ${addedCount} rules.`, "Project Gremlin");
-        return addedCount;
-    }
-
-    parseTwinResponse(rawResponse, twinName) {
-        if (!rawResponse || !rawResponse.trim()) {
-            console.warn(`${LOG_PREFIX} ${twinName} (Iterative Regex) returned empty response.`);
-            return {};
-        }
-        try {
-            const jsonMatch = rawResponse.match(/```json\s*([\s\S]*?)\s*```|(\{[\s\S]*?\}|\[[\s\S]*?\])/s);
-            if (jsonMatch) {
-                const jsonString = jsonMatch[1] || jsonMatch[2]; 
-                return JSON.parse(jsonString);
-            }
-            return JSON.parse(rawResponse); 
-        } catch (e) {
-            console.error(`${LOG_PREFIX} Failed to parse JSON from ${twinName} (Iterative Regex). Error: ${e.message}. Raw:`, rawResponse);
-            this.toastr.warning(`${twinName} (Iterative Regex) output unparseable. See console.`);
-            return {};
-        }
-    }
-    
-    constructTwinIterativePrompt(twinRole, currentCycle, totalCycles, candidateData, currentFindRegex, currentAlternatives, previousTwinNotes = "") {
-        const isFinalVaxTurn = twinRole === 'vax' && currentCycle === totalCycles;
-
-        let prompt = `You are ${twinRole === 'vex' ? 'Vex, the creative wordsmith' : 'Vax, the logical regex technician'}, collaborating on a rule for a repetitive phrase.
-Original Candidate: "${candidateData.candidate}"
-Context: "${candidateData.enhanced_context}"
-Current Cycle: ${currentCycle} of ${totalCycles}. Your turn as ${twinRole}.
-`;
-
-        if (currentFindRegex) {
-            prompt += `\nCurrent findRegex (from previous step, refine if needed): \`${currentFindRegex}\`\n`;
-        } else {
-            prompt += `\nNo findRegex yet. Please propose one if you are Vax, or Vex can start drafting one.\n`;
-        }
-
-        if (currentAlternatives && currentAlternatives.length > 0) {
-            prompt += `Current Alternatives (list of strings, from previous step - Review, Refine, Expand):\n${JSON.stringify(currentAlternatives, null, 2)}\n`;
-        } else {
-            prompt += `\nNo alternatives yet. Please start generating them if you are Vex, or Vax can review Vex's initial set.\n`;
-        }
-        
-        if (previousTwinNotes) {
-            prompt += `\nNotes from your partner (${twinRole === 'vex' ? 'Vax' : 'Vex'} from previous turn):\n${previousTwinNotes}\n`;
-        }
-
-        prompt += "\nYour Specific Tasks for THIS Turn:\n";
-
-        if (twinRole === 'vex') {
-            prompt += "- Focus on CREATIVITY and DIVERSITY for alternatives. Generate new ones, refine existing ones to be more evocative and distinct.\n";
-            prompt += "- If `findRegex` exists, ensure your alternatives match its capture groups. If not, you can suggest a basic `findRegex` structure that would support good alternatives.\n";
-            prompt += `- Aim to have a strong list of at least 7-10 good alternatives after your turn. Quality over quantity if forced, but try for both.
-`
-            prompt += `- Provide brief \`notes_for_vax\` outlining your changes, any regex thoughts, or areas Vax should focus on for technical refinement.\n`;
-            prompt += 'Output JSON with keys: "findRegex" (string, your best version or proposal), "alternatives" (array of strings, your refined/expanded list), "notes_for_vax" (string, which is optional).\n'; 
-        } else { // Vax's turn
-            prompt += "- Focus on TECHNICAL PRECISION for `findRegex`. Ensure it's robust, correctly uses capture groups, word boundaries, and generalization.\n";
-            prompt += "- Review Vex's `alternatives`. Ensure they grammatically fit the `findRegex` and its capture groups. Add more technical or structural variations if appropriate.\n";
-            if (isFinalVaxTurn) {
-                prompt += `- THIS IS THE FINAL TURN. You MUST finalize the rule:
-    - Ensure \`findRegex\` is perfect.
-    - Expand/refine \`alternatives\` (your current list of alternative strings) to have AT LEAST ${MIN_ALTERNATIVES_PER_RULE} high-quality, diverse options.
-    - Generate a concise, descriptive \`scriptName\` for the rule.
-    - **CRITICAL \`replaceString\` FORMATTING**: Compile the final list of alternatives into a single \`replaceString\`. This string MUST be in the exact format: \`{{random:alt1,alt2,alt3,...,altN}}\`.
-    - Alternatives MUST be separated by a **single comma (,)**. Do not use pipes (|) or any other separator.
-    - **Refer to correctly formatted examples like**: \`"replaceString": "{{random:first option,second option,third option with $1,fourth,fifth}}"\` (Ensure you use actual generated alternatives, not these placeholders).
-Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceString" (string). All fields are mandatory.\n`;
-            } else {
-                prompt += `- Aim to solidify the \`findRegex\` and ensure the \`alternatives\` list is growing well.\n`;
-                prompt += `- Provide brief \`notes_for_vex\` outlining your regex changes, suggestions for alternative types Vex could explore, or quality checks.\n`;
-                prompt += 'Output JSON with keys: "findRegex" (string, your refined version), "alternatives" (array of strings, your refined/expanded list), "notes_for_vex" (string, which is optional).\n';
-            }
-        }
-        prompt += `\nIMPORTANT: Output ONLY the JSON object. No other text or markdown.\nIf, on Vaxs final turn, you determine this candidate cannot be made into a high-quality rule meeting all criteria (especially the ${MIN_ALTERNATIVES_PER_RULE} alternatives and the **exact** \`replaceString\` format), output an empty JSON object: {}.`;
-        return prompt;
-    }
-
 
     async handleGenerateRulesFromAnalysisClick(dynamicRulesRef, regexNavigatorRef) {
         if (typeof window.isAppReady === 'undefined' || !window.isAppReady) { this.toastr.info("SillyTavern is still loading, please wait."); return; }
@@ -727,14 +529,23 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
         const candidatesForAi = [];
         const contextMap = new Map();
         for (const data of this.ngramFrequencies.values()) {
-            contextMap.set(data.original, data.contextSentence);
+            contextMap.set(
+                data.original,
+                (data.contexts || [data.contextSentence]).filter(Boolean),
+            );
         }
 
         // 1. Process merged patterns
         for (const [pattern, score] of Object.entries(this.analyzedLeaderboardData.merged)) {
+            const contexts = [...contextMap.entries()]
+                .filter(([phrase]) => phrase.includes(pattern) || pattern.includes(phrase))
+                .flatMap(([, examples]) => examples)
+                .filter((example, index, all) => all.indexOf(example) === index)
+                .slice(0, 5);
+            if (contexts.length === 0) continue;
             candidatesForAi.push({
                 candidate: pattern,
-                enhanced_context: pattern, // For patterns, the pattern itself is the best context
+                enhanced_context: contexts,
                 score: score,
             });
         }
@@ -743,7 +554,7 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
         for (const [phrase, score] of Object.entries(this.analyzedLeaderboardData.remaining)) {
             candidatesForAi.push({
                 candidate: phrase,
-                enhanced_context: contextMap.get(phrase) || phrase, // Use real sentence context
+                enhanced_context: contextMap.get(phrase) || [],
                 score: score,
             });
         }
@@ -757,15 +568,14 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
         }
         // --- END: REVISED CANDIDATE GATHERING LOGIC ---
 
-        const candidatesForPreScreening = candidatesForAi.slice(0, TWINS_PRESCREEN_BATCH_SIZE);
+        const candidatesForPreScreening = candidatesForAi.slice(0, PRESCREEN_BATCH_SIZE);
         let validCandidatesForGeneration = [];
         
         if (this.settings.skipTriageCheck) {
             console.log(`${LOG_PREFIX} [Manual Gen] Skip Triage is enabled. Using direct candidates.`);
             validCandidatesForGeneration = candidatesForPreScreening;
         } else {
-            const rawCandidatesForTwins = candidatesForPreScreening.map(c => c.candidate);
-            validCandidatesForGeneration = await this.callTwinsForSlopPreScreening(rawCandidatesForTwins);
+            validCandidatesForGeneration = await this.reviewSlopCandidates(candidatesForPreScreening);
         }
 
         const batchToProcess = validCandidatesForGeneration.slice(0, BATCH_SIZE);
@@ -779,20 +589,10 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
         let newRulesCount = 0;
 
         try {
-            // *** FIX: Correctly route the generation method ***
-            if (this.settings.regexGenerationMethod === 'twins') {
-                newRulesCount = await this.generateRulesIterativelyWithTwins(batchToProcess, dynamicRulesRef, this.settings.regexTwinsCycles);
-            } 
-            else if (this.settings.regexGenerationMethod === 'single') {
-                const gremlinRoleForRegexGen = this.settings.regexGeneratorRole || 'writer';
-                const roleForGenUpper = gremlinRoleForRegexGen.charAt(0).toUpperCase() + gremlinRoleForRegexGen.slice(1);
-                this.toastr.info(`Prose Polisher: Starting AI rule generation for ${batchToProcess.length} candidates (using ${roleForGenUpper} settings)...`);
-                newRulesCount = await this.generateAndSaveDynamicRulesWithSingleGremlin(batchToProcess, dynamicRulesRef, gremlinRoleForRegexGen);
-            }
-            else { // This now correctly handles 'current'
-                this.toastr.info(`Prose Polisher: Starting AI rule generation for ${batchToProcess.length} candidates (using current connection)...`);
-                newRulesCount = await this.generateAndSaveDynamicRulesWithSingleGremlin(batchToProcess, dynamicRulesRef, 'current');
-            }
+            this.toastr.info(
+                `Starting AI rule generation for ${batchToProcess.length} candidates using the current connection...`,
+            );
+            newRulesCount = await this.generateAndSaveDynamicRules(batchToProcess, dynamicRulesRef);
         } catch (error) {
             console.error(`${LOG_PREFIX} Top-level error during rule generation:`, error);
             this.toastr.error("An unexpected error occurred during rule generation. Check console.");
