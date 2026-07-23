@@ -1,6 +1,6 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
-import { applyGremlinEnvironment, executeGen } from './projectgremlin.js'; // Ensure these are correctly imported
+import { generateText } from './generation.js';
 import { prompts } from './prompts.js'; // <-- IMPORT THE NEW PROMPTS FILE
 
 // Import all new and existing data files
@@ -380,12 +380,8 @@ export class Analyzer {
         const userPrompt = `Evaluate the following potential slop phrases/patterns:\n- ${rawCandidates.join('\n- ')}\n\nProvide the JSON array of evaluations now.`;
 
         try {
-            this.toastr.info("Prose Polisher: Twins are pre-screening slop candidates...", "Project Gremlin", { timeOut: 7000 });
-            if (!await applyGremlinEnvironment('twins')) {
-                throw new Error("Failed to configure environment for Twin Gremlins pre-screening.");
-            }
-
-            const rawResponse = await executeGen(`${systemPrompt}\n\n${userPrompt}`);
+            this.toastr.info("Prose Polisher: Reviewing slop candidates...", "Prose Polisher", { timeOut: 7000 });
+            const rawResponse = await generateText(`${systemPrompt}\n\n${userPrompt}`);
             if (!rawResponse || !rawResponse.trim()) {
                 console.warn(`${LOG_PREFIX} Twins returned an empty response during pre-screening.`);
                 return rawCandidates.map(c => ({ candidate: c, enhanced_context: c })); 
@@ -418,12 +414,12 @@ export class Analyzer {
                  console.log(`${LOG_PREFIX} Twins rejected ${rejectedCount} slop candidates during pre-screening.`);
             }
 
-            this.toastr.success(`Prose Polisher: Twins pre-screened ${rawCandidates.length} candidates. ${validCandidates.length} approved.`, "Project Gremlin", { timeOut: 4000 });
+            this.toastr.success(`Prose Polisher reviewed ${rawCandidates.length} candidates. ${validCandidates.length} approved.`, "Prose Polisher", { timeOut: 4000 });
             return validCandidates;
 
         } catch (error) {
             console.error(`${LOG_PREFIX} Error during Twins pre-screening:`, error);
-            this.toastr.error(`Prose Polisher: Twins pre-screening failed. ${error.message}. Proceeding with raw candidates.`, "Project Gremlin");
+            this.toastr.error(`Candidate review failed: ${error.message}. Proceeding with raw candidates.`, "Prose Polisher");
             return rawCandidates.map(c => ({ candidate: c, enhanced_context: c })); 
         }
     }
@@ -449,14 +445,11 @@ export class Analyzer {
         try {
             if (gremlinRoleForGeneration !== 'current') {
                 this.toastr.info(`Prose Polisher: Configuring '${roleForGenUpper}' environment for rule generation...`, "Project Gremlin", { timeOut: 7000 });
-                if (!await applyGremlinEnvironment(gremlinRoleForGeneration)) {
-                    throw new Error(`Failed to configure environment for rule generation using ${roleForGenUpper} Gremlin's settings.`);
-                }
-                this.toastr.info(`Prose Polisher: Generating regex rules via AI (${roleForGenUpper})...`, "Project Gremlin", { timeOut: 25000 });
+                this.toastr.info(`Prose Polisher: Generating regex rules via AI...`, "Prose Polisher", { timeOut: 25000 });
             } else {
                 this.toastr.info(`Prose Polisher: Generating regex rules via AI (using current connection)...`, "Project Gremlin", { timeOut: 25000 });
             }
-            const rawResponse = await executeGen(fullPrompt);
+            const rawResponse = await generateText(fullPrompt);
 
             if (!rawResponse || !rawResponse.trim()) {
                 this.toastr.warning(`Prose Polisher: ${roleForGenUpper} returned no data for rule generation.`);
@@ -547,16 +540,12 @@ export class Analyzer {
             let lastValidOutput = {}; 
 
             try {
-                if (!await applyGremlinEnvironment('twins')) {
-                    throw new Error("Failed to configure environment for Twin Gremlins (Iterative Regex).");
-                }
-
                 for (let cycle = 1; cycle <= numCycles; cycle++) {
                     if (this.isProcessingAiRules === false) { console.warn("Rule processing aborted by user/system."); return addedCount; }
 
                     this.toastr.info(`Regex Gen: Candidate "${candidateData.candidate.substring(0,20)}..." - Cycle ${cycle}/${numCycles} (Vex)...`, "Project Gremlin", { timeOut: 12000 });
                     let vexPrompt = this.constructTwinIterativePrompt('vex', cycle, numCycles, candidateData, currentFindRegex, currentAlternatives, lastValidOutput.notes_for_vax);
-                    let vexRawResponse = await executeGen(vexPrompt);
+                    let vexRawResponse = await generateText(vexPrompt);
                     let vexOutput = this.parseTwinResponse(vexRawResponse, 'Vex');
                     lastValidOutput = {...lastValidOutput, ...vexOutput}; 
                     if (vexOutput.findRegex) currentFindRegex = vexOutput.findRegex;
@@ -566,7 +555,7 @@ export class Analyzer {
 
                     this.toastr.info(`Regex Gen: Candidate "${candidateData.candidate.substring(0,20)}..." - Cycle ${cycle}/${numCycles} (Vax)...`, "Project Gremlin", { timeOut: 12000 });
                     let vaxPrompt = this.constructTwinIterativePrompt('vax', cycle, numCycles, candidateData, currentFindRegex, currentAlternatives, lastValidOutput.notes_for_vex);
-                    let vaxRawResponse = await executeGen(vaxPrompt);
+                    let vaxRawResponse = await generateText(vaxPrompt);
                     let vaxOutput = this.parseTwinResponse(vaxRawResponse, 'Vax');
                     lastValidOutput = {...lastValidOutput, ...vaxOutput};
                     if (vaxOutput.findRegex) currentFindRegex = vaxOutput.findRegex;
