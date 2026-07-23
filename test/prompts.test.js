@@ -49,3 +49,27 @@ test('prompt builder appends candidates to custom prompts without a placeholder'
     assert.match(prompt, /Candidates:\n\[/);
     assert.match(prompt, /"candidate": "looked away"/);
 });
+
+test('blank custom prompts safely fall back to the full default contract', () => {
+    const prompt = buildRuleGenerationPrompt(
+        '   ',
+        [{ candidate: 'looked away' }],
+        4,
+    );
+
+    assert.match(prompt, /REPETITION IS BETTER/);
+    assert.match(prompt, /at least 4 distinct JSON strings/);
+    assert.match(prompt, /"candidate": "looked away"/);
+    assert.doesNotMatch(prompt, /\$\{MIN_ALTERNATIVES_PER_RULE\}/);
+});
+
+test('prompt construction does not mutate candidate evidence', () => {
+    const candidates = [{
+        candidate: 'nodded slowly',
+        enhanced_context: ['She nodded slowly.', 'He nodded slowly.'],
+    }];
+    const before = structuredClone(candidates);
+
+    buildRuleGenerationPrompt('{{CANDIDATES}}', candidates, 3);
+    assert.deepEqual(candidates, before);
+});
