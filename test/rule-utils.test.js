@@ -209,3 +209,68 @@ test('preview warns when a rule has no grounded matches', () => {
     assert.equal(preview.examples.length, 0);
     assert.match(preview.warnings.join(' '), /did not match/);
 });
+
+test('generated compatibility evidence must contain three distinct sentences', () => {
+    const repeated = 'She nodded slowly before leaving.';
+    const validation = validateGeneratedRule({
+        scriptName: 'Slow nod',
+        findRegex: 'nodded slowly',
+        alternatives: ['gave a slow nod'],
+        semanticInvariant: 'The subject performs a slow nod without inferred agreement.',
+        testCases: [repeated, repeated, repeated],
+        risk: 'low',
+    });
+
+    assert.equal(validation.valid, false);
+    assert.match(validation.errors.join(' '), /3 distinct compatibility test cases/);
+});
+
+test('named captures count while lookarounds remain noncapturing', () => {
+    const validation = validateRule({
+        scriptName: 'Named capture',
+        findRegex: '(?<=said )(?<word>quietly)(?=\\.)',
+        alternatives: ['$1 softly'],
+    });
+
+    assert.equal(validation.valid, true);
+});
+
+test('application replaces every match while preserving each capture', () => {
+    const result = applyRule(
+        'He looked away. She looked away.',
+        {
+            scriptName: 'Look away',
+            findRegex: '(He|She) looked away',
+            alternatives: ['$1 turned aside'],
+        },
+        alternatives => alternatives[0],
+    );
+
+    assert.equal(result, 'He turned aside. She turned aside.');
+});
+
+test('invalid rules leave source text unchanged', () => {
+    assert.equal(
+        applyRule('Keep this sentence.', {
+            scriptName: 'Broken',
+            findRegex: '(',
+            alternatives: ['replacement'],
+        }),
+        'Keep this sentence.',
+    );
+});
+
+test('preview respects its result limit', () => {
+    const preview = previewRule(
+        'word word word word',
+        {
+            scriptName: 'Word',
+            findRegex: 'word',
+            alternatives: ['term'],
+        },
+        2,
+    );
+
+    assert.equal(preview.examples.length, 2);
+    assert.deepEqual(preview.examples.map(example => example.index), [0, 5]);
+});
