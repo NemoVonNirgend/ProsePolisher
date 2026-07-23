@@ -1010,8 +1010,7 @@ async function triggerDynamicRuleGenerationIfNeeded() {
                 validCandidatesForGeneration = candidatesForAutoTrigger;
             } else {
                 window.toastr.info(`Prose Polisher: Auto-triggering Twins pre-screening for ${candidatesForAutoTrigger.length} candidates...`, "Project Gremlin");
-                const rawCandidates = candidatesForAutoTrigger.map(c => c.candidate);
-                validCandidatesForGeneration = await prosePolisherAnalyzer.callTwinsForSlopPreScreening(rawCandidates, getCompiledRegexes());
+                validCandidatesForGeneration = await prosePolisherAnalyzer.callTwinsForSlopPreScreening(candidatesForAutoTrigger);
             }
         } catch (error) {
             console.error(`${LOG_PREFIX} Error in auto-trigger pre-screening chain:`, error);
@@ -1209,7 +1208,45 @@ class RegexNavigator {
             const ruleId = rule.id || (rule.scriptName ? PROSE_POLISHER_ID_PREFIX + rule.scriptName.replace(/\s+/g, '_') : PROSE_POLISHER_ID_PREFIX + `rule_${Date.now()}`);
             item.dataset.id = ruleId;
             if (!rule.id) rule.id = ruleId; 
-            item.innerHTML = `<div class="item-icon"><i class="fa-solid ${rule.isStatic ? 'fa-database' : 'fa-wand-magic-sparkles'}"></i></div><div class="item-details"><div class="script-name">${rule.scriptName || '(No Name)'}</div><div class="find-regex">${rule.findRegex}</div></div><div class="item-status">${rule.isStatic ? '<span>Static</span>' : '<span>Dynamic</span>'}<i class="fa-solid ${rule.disabled ? 'fa-toggle-off' : 'fa-toggle-on'} status-toggle-icon" title="Toggle Enable/Disable"></i></div>`;
+            const iconWrap = document.createElement('div');
+            iconWrap.className = 'item-icon';
+            const icon = document.createElement('i');
+            icon.className = `fa-solid ${rule.isStatic ? 'fa-database' : 'fa-wand-magic-sparkles'}`;
+            iconWrap.appendChild(icon);
+
+            const details = document.createElement('div');
+            details.className = 'item-details';
+            const name = document.createElement('div');
+            name.className = 'script-name';
+            name.textContent = rule.scriptName || '(No Name)';
+            const regex = document.createElement('div');
+            regex.className = 'find-regex';
+            regex.textContent = rule.findRegex || '';
+            details.append(name, regex);
+
+            if (rule.semanticInvariant) {
+                const invariant = document.createElement('div');
+                invariant.className = 'pp-rule-invariant';
+                invariant.textContent = rule.semanticInvariant;
+                details.appendChild(invariant);
+            }
+
+            const status = document.createElement('div');
+            status.className = 'item-status';
+            const type = document.createElement('span');
+            type.textContent = rule.isStatic ? 'Static' : 'Dynamic';
+            status.appendChild(type);
+            if (rule.risk) {
+                const risk = document.createElement('span');
+                risk.className = `pp-rule-risk risk-${rule.risk}`;
+                risk.textContent = `${rule.risk} risk`;
+                status.appendChild(risk);
+            }
+            const toggle = document.createElement('i');
+            toggle.className = `fa-solid ${rule.disabled ? 'fa-toggle-off' : 'fa-toggle-on'} status-toggle-icon`;
+            toggle.title = 'Toggle Enable/Disable';
+            status.appendChild(toggle);
+            item.append(iconWrap, details, status);
             item.addEventListener('pointerup', (e) => {
                 const currentRuleId = item.dataset.id;
                 if (e.target.closest('.status-toggle-icon')) { this.toggleRuleStatus(currentRuleId); }
