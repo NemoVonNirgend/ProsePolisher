@@ -1,3 +1,11 @@
+# Prose Polisher
+
+Prose Polisher is a repetition analyzer and correction-rule manager for SillyTavern. It tracks recurring language, surfaces patterns for review, and can use an LLM to draft correction rules.
+
+Version 6 changes the safety model: newly generated rules are held disabled for review unless the user explicitly enables automatic activation.
+
+> **Project Gremlin migration:** The bundled multi-model generation pipeline is moving to [Nemo Orchestrator](https://github.com/NemoVonNirgend/NemoOrchestrator). It remains temporarily in the modernization branch so existing configurations can be migrated after feature-parity testing.
+
 ## Table of Contents
 - [Key Features](#key-features)
 - [How It Works: The Three Pillars](#how-it-works-the-three-pillars)
