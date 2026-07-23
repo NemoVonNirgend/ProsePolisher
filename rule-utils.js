@@ -36,35 +36,105 @@ export function normalizeRule(rule) {
     };
 }
 
+function countCapturingGroups(source = '') {
+    let count = 0;
+    let escaped = false;
+    let inCharacterClass = false;
+
+    for (let index = 0; index < source.length; index++) {
+        const character = source[index];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (character === '\\') {
+            escaped = true;
+            continue;
+        }
+        if (character === '[') {
+            inCharacterClass = true;
+            continue;
+        }
+        if (character === ']') {
+            inCharacterClass = false;
+            continue;
+        }
+        if (character !== '(' || inCharacterClass) continue;
+
+        if (source[index + 1] !== '?') {
+            count++;
+            continue;
+        }
+
+        const namedCapturePrefix = source.slice(index, index + 3) === '(?<';
+        const lookbehind = ['=', '!'].includes(source[index + 3]);
+        if (namedCapturePrefix && !lookbehind) count++;
+    }
+
+    return count;
+}
+
+function referencedCaptureGroups(alternatives) {
+    return alternatives.flatMap(alternative =>
+        [...alternative.matchAll(/\$(\d{1,2})/g)].map(match => Number(match[1])),
+    );
+}
+
 export function validateRule(rule, minimumAlternatives = 1) {
     const errors = [];
     const warnings = [];
     let regex = null;
 
-    try {
-        regex = new RegExp(rule?.findRegex, 'gi');
-    } catch (error) {
-        errors.push(`Invalid regular expression: ${error.message}`);
+    if (!rule?.findRegex?.trim()) {
+        errors.push('A non-empty regular expression is required.');
+    } else {
+        try {
+            regex = new RegExp(rule.findRegex, 'gi');
+            if (regex.test('')) {
+                errors.push('The regular expression must not match an empty string.');
+            }
+            regex.lastIndex = 0;
+        } catch (error) {
+            errors.push(`Invalid regular expression: ${error.message}`);
+        }
     }
 
     const alternatives = parseAlternatives(rule);
     if (alternatives.length < minimumAlternatives) {
         errors.push(`Expected at least ${minimumAlternatives} replacement alternatives; found ${alternatives.length}.`);
     }
-    if (alternatives.some(value => value.includes('::'))) {
-        errors.push('Replacement alternatives cannot contain the `::` macro delimiter.');
+    const uniqueAlternatives = new Set(alternatives);
+    if (uniqueAlternatives.size < minimumAlternatives) {
+        errors.push(`Expected at least ${minimumAlternatives} distinct replacement alternatives; found ${uniqueAlternatives.size}.`);
     }
-    if (new Set(alternatives).size !== alternatives.length) {
+    if (alternatives.some(value => value.includes('::') || value.includes('{{') || value.includes('}}'))) {
+        errors.push('Replacement alternatives cannot contain SillyTavern macro delimiters.');
+    }
+    if (uniqueAlternatives.size !== alternatives.length) {
         warnings.push('Duplicate replacement alternatives were found.');
+    }
+    if (alternatives.some(value => value !== value.trim())) {
+        warnings.push('Replacement alternatives should not begin or end with whitespace.');
     }
     if (!rule?.scriptName?.trim()) {
         warnings.push('The rule has no descriptive name.');
     }
 
+    const captureCount = countCapturingGroups(rule?.findRegex);
+    const invalidReferences = referencedCaptureGroups(alternatives)
+        .filter(index => index === 0 || index > captureCount);
+    if (invalidReferences.length > 0) {
+        errors.push(
+            `Replacement alternatives reference capture groups not provided by the regex: ${[
+                ...new Set(invalidReferences.map(index => `$${index}`)),
+            ].join(', ')}.`,
+        );
+    }
+
     return { valid: errors.length === 0, errors, warnings, regex, alternatives };
 }
 
-export function validateGeneratedRule(rule, minimumAlternatives = 1) {
+export function validateGeneratedRule(rule, minimumAlternatives = 1, groundedContexts = []) {
     const validation = validateRule(rule, minimumAlternatives);
     const errors = [...validation.errors];
     const warnings = [...validation.warnings];
@@ -74,6 +144,8 @@ export function validateGeneratedRule(rule, minimumAlternatives = 1) {
 
     if (!rule?.semanticInvariant?.trim()) {
         errors.push('Generated rules must state their semantic invariant.');
+    } else if (rule.semanticInvariant.trim().length < 20) {
+        errors.push('The semantic invariant is too vague to review safely.');
     }
     if (rule?.risk === 'high') {
         errors.push('High-risk generated rules are not accepted.');
@@ -83,11 +155,26 @@ export function validateGeneratedRule(rule, minimumAlternatives = 1) {
     if (testCases.length < 3) {
         errors.push(`Generated rules require at least 3 compatibility test cases; found ${testCases.length}.`);
     }
+    if (testCases.some(testCase => !/[.!?]["')\]]?$/.test(testCase))) {
+        errors.push('Generated compatibility tests must be complete sentences with terminal punctuation.');
+    }
+    const normalizedContexts = groundedContexts
+        .map(context => String(context).replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+    if (normalizedContexts.length > 0) {
+        for (const testCase of testCases) {
+            const normalizedTest = testCase.replace(/\s+/g, ' ').trim();
+            if (!normalizedContexts.some(context => context.includes(normalizedTest))) {
+                errors.push(`Compatibility test was not found in the supplied chat context: "${testCase}"`);
+            }
+        }
+    }
 
     if (validation.regex) {
         for (const testCase of testCases) {
             validation.regex.lastIndex = 0;
-            if (!validation.regex.test(testCase)) {
+            const match = validation.regex.exec(testCase);
+            if (!match) {
                 errors.push(`Regex did not match compatibility test: "${testCase}"`);
                 continue;
             }
@@ -100,6 +187,12 @@ export function validateGeneratedRule(rule, minimumAlternatives = 1) {
                 }
                 if (/\$\d{1,2}|\$&/.test(result)) {
                     errors.push(`Alternative left an unresolved capture token: "${alternative}"`);
+                    break;
+                }
+                const addsTerminalPunctuation = /[.!?]["')\]]?$/.test(alternative) &&
+                    !/[.!?]["')\]]?$/.test(match[0]);
+                if (addsTerminalPunctuation) {
+                    errors.push(`Alternative adds terminal punctuation not consumed by the regex: "${alternative}"`);
                     break;
                 }
             }
@@ -155,5 +248,10 @@ export function previewRule(text, rule, limit = 5) {
         if (match[0] === '') previewRegex.lastIndex += 1;
     }
 
-    return { ...validation, examples };
+    const warnings = [...validation.warnings];
+    if (examples.length === 0) {
+        warnings.push('The rule did not match the supplied preview text.');
+    }
+
+    return { ...validation, warnings, examples };
 }
