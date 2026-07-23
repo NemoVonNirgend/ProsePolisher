@@ -1,146 +1,122 @@
 # Prose Polisher
 
-Prose Polisher is a repetition analyzer and correction-rule manager for SillyTavern. It tracks recurring language, surfaces patterns for review, and can use an LLM to draft correction rules.
+Prose Polisher is a repetition analyzer and correction-rule manager for SillyTavern. It finds recurring narrative language, presents the evidence for review, and helps build narrowly scoped replacements without changing a sentence’s grammar or meaning.
 
-Version 6 changes the safety model: newly generated rules are held disabled for review unless the user explicitly enables automatic activation.
+Version 6 makes Prose Polisher the focused home for prose analysis and rule management. The former Project Gremlin generation pipeline now lives in [Nemo Orchestrator](https://github.com/NemoVonNirgend/NemoOrchestrator).
 
-> **Project Gremlin migration:** The multi-model generation pipeline has moved to [Nemo Orchestrator](https://github.com/NemoVonNirgend/NemoOrchestrator). Nemo Orchestrator automatically imports existing custom stage settings from Prose Polisher; the saved source settings are left intact as a recovery copy.
+## What It Does
 
-## Table of Contents
-- [Key Features](#key-features)
-- [How It Works: The Three Pillars](#how-it-works-the-three-pillars)
-- [Usage Guide](#usage-guide)
-  - [Initial Setup](#initial-setup)
-  - [The Settings Panel](#the-settings-panel)
-  - [The Regex Navigator](#the-regex-navigator)
-  - [AI Rule Generation in Action](#ai-rule-generation-in-action)
-- [For Power Users](#for-power-users)
-  - [Manually Adding Static Rules](#manually-adding-static-rules)
-  - [Understanding the AI Prompt](#understanding-the-ai-prompt)
-- [Troubleshooting & FAQ](#troubleshooting--faq)
-- [Contributing](#contributing)
-- [License](#license)
+- Tracks repeated phrases in the current chat.
+- Groups related repetition patterns and shows a frequency leaderboard.
+- Supports curated static rules and user-owned dynamic rules.
+- Previews replacements against real chat text before activation.
+- Uses the current SillyTavern connection to review candidates and draft rules.
+- Synchronizes enabled rules with SillyTavern’s global Regex Processor.
+- Preserves commas and normal punctuation with SillyTavern’s modern `{{random::a::b}}` syntax.
 
----
+## Safety Model
 
-## Key Features
+Generated rules are conservative by design.
 
-*   **✒️ Curated Static Rules:** Comes pre-loaded with over 30 high-quality rules to fix the most common writing clichés, such as repetitive blushing, hitched breaths, pounding hearts, and more.
-*   **🧠 Dynamic AI Learning:** When enabled, the extension actively listens to AI messages, identifies *new* repetitive phrases unique to your current model or character, and uses an LLM to automatically generate new, creative regex rules to fix them.
-*   **🎛️ Full Regex Navigator:** A dedicated UI to view, enable/disable, edit, and create your own static or dynamic rules without ever touching a JSON file.
-*   **📊 On-Demand Chat Analysis:** Analyze your entire chat history with a single click to instantly populate frequency data and identify potential slop candidates for AI rule generation.
-*   **Capitalization Correction:** Automatically capitalizes the beginning of sentences in AI responses, ensuring that replacements fit seamlessly and grammatically.
-*   **💡 Intelligent Pattern Detection:** The frequency analysis is smart. It groups similar phrases (e.g., "a flicker of doubt crossed his eyes" and "a flicker of anger crossed his face") into a single, more powerful pattern.
-*   **✅ Seamless Integration:** Rules are applied globally and instantly, altering both the displayed chat and the context sent in the next prompt, preventing the AI from repeating its own slop.
+- Candidate examples must come from real chat context.
+- Rules must preserve subject, object, agency, tense, person, number, point of view, negation, certainty, intensity, facts, and ambiguity.
+- Every rule requires a stated semantic invariant and at least three distinct compatibility sentences.
+- Invalid regexes, empty matches, missing capture groups, nested macros, punctuation-padding errors, and high-risk rules are rejected.
+- Newly generated rules are disabled for review by default.
 
----
+You can opt into automatic activation, but review-first is the recommended setting. Repetition is preferable to a replacement that changes meaning or breaks grammar.
 
-## How It Works: The Three Pillars
+## Installation
 
-Prose Polisher operates on three core principles to provide a comprehensive solution.
+Install through SillyTavern’s extension installer:
 
-1.  **Static Correction (The Foundation):**
-    The `regex_rules.json` file contains a list of hand-crafted rules that target common, universally acknowledged writing crutches. When "Enable Static Regex Fixes" is on, these rules are always active, instantly replacing phrases like *"His cheeks flushed red"* with more engaging alternatives like *"as warmth spread across his cheeks"*.
+```text
+https://github.com/NemoVonNirgend/ProsePolisher
+```
 
-2.  **Dynamic Learning (The Smart Assistant):**
-    This is the AI-powered core. When "Enable Dynamic AI Learning" is active:
-    *   The extension analyzes every incoming AI message for repetitive phrases (n-grams).
-    *   When a phrase is repeated more than a set number of times (`SLOP_THRESHOLD`, default 3), it's flagged as a "slop candidate".
-    *   After a certain number of further messages (`dynamicTriggerCount`), the extension sends these candidates to an LLM.
-    *   The AI is prompted to act as a regex expert, creating new `findRegex` and `replaceString` rules for the provided slop.
-    *   These new rules are automatically saved and activated, teaching Prose Polisher how to fix the specific bad habits of your current AI model.
+After installation, open **Extensions → Prose Polisher**.
 
-3.  **User Control (The Cockpit):**
-    You are the final arbiter of style. The **Regex Navigator** and settings panel give you total control. You can disable rules you don't like, edit AI-generated rules to better suit your taste, or create entirely new ones from scratch. You can also manually trigger the analysis and rule generation process at any time.
+## Typical Workflow
 
----
+1. Keep static rules enabled.
+2. Enable dynamic analysis if you want Prose Polisher to learn from the current chat.
+3. Use **Analyze Chat History** to collect repetition evidence immediately, or let it accumulate while chatting.
+4. Inspect **View Frequency Data** and adjust the whitelist or blacklist if necessary.
+5. Select **Generate AI Rules from Analysis**.
+6. Review new disabled rules in the **Regex Navigator**.
+7. Preview, edit, and enable only the rules you want.
 
-## Usage Guide
+## Settings
 
-### Initial Setup
+- **Global Regex integration:** Publishes enabled Prose Polisher rules to SillyTavern’s Regex Processor.
+- **Static rules:** Enables the bundled correction rules.
+- **Dynamic learning:** Tracks repetition and permits automatic analysis triggers.
+- **Auto-rule trigger:** Controls how many messages are observed before an automatic generation pass.
+- **Slop threshold:** Sets the repetition score required before a phrase becomes a candidate.
+- **Skip triage:** Sends candidates directly to rule generation. Leave this off unless you understand the increased risk.
+- **Automatically activate generated rules:** Bypasses review-first activation.
+- **N-gram and pattern controls:** Tune phrase length, common-pattern requirements, pruning, and leaderboard refresh frequency.
+- **Generation instructions:** Opens the editable rule-generation contract. Resetting it restores the maintained default prompt.
 
-After installation, navigate to the Extensions settings panel. You will find the "Prose Polisher (Regex + AI)" section.
+## Regex Navigator
 
-*   **Enable Static Regex Fixes:** It's highly recommended to keep this checked. This activates the foundational set of rules.
-*   **Enable Dynamic AI Learning:** Check this if you want the extension to learn and adapt to your AI's writing style. This is the most powerful feature of the extension.
+The navigator is the supported place to manage Prose Polisher rules.
 
-### The Settings Panel
+- Static rules can be inspected and enabled or disabled.
+- Dynamic rules can be created, edited, previewed, enabled, disabled, or deleted.
+- Preview results show the exact matched span and deterministic replacement example.
+- A zero-match preview is reported explicitly rather than treated as proof that a rule is safe.
 
-*   **Auto-Rule Gen Trigger:** This number determines how many AI messages to wait *after* a slop candidate has been identified before sending it to the AI for rule generation. A lower number means faster rule creation; a higher number means it will batch more candidates together.
-*   **Open Regex Navigator:** Opens the main UI for managing all your rules.
-*   **Clear Frequency Data:** Resets all tracked phrase counts. Use this if you switch models or characters and want to start fresh.
-*   **Analyze Chat History:** A powerful tool. Click this to have Prose Polisher read your *entire* current chat history and build a list of all repetitive phrases. This is the fastest way to find slop.
-*   **View Frequency Data:** Opens a popup showing a live leaderboard of the most-repeated phrases and detected patterns in your chat.
-*   **Generate AI Rules from Analysis:** After running an analysis or letting the extension run for a while, click this to *manually* trigger the AI rule generation process for all currently identified slop candidates.
+Dynamic rules store replacements as an `alternatives` array. Compatibility with older `replaceString` rules is retained, including legacy comma macros, but newly serialized multi-option rules use the current double-colon syntax.
 
-### The Regex Navigator
+## Project Gremlin Migration
 
-This is your command center for all rules.
+Prose Polisher no longer runs or displays Project Gremlin.
 
-*   **Static vs. Dynamic:** Rules are clearly marked. Static rules (from the base file) cannot be deleted or have their content edited, but they can be disabled. Dynamic rules (created by you or the AI) are fully editable.
-*   **Enable/Disable:** Click the toggle icon on the right to quickly turn any rule on or off.
-*   **Edit/View:** Click anywhere else on a rule to open the editor.
-*   **Create:** Click the "New Dynamic Rule" button to create a custom rule from scratch.
-*   **New Rule Highlighting:** Newly AI-generated rules will have a pulsing glow, making them easy to spot.
+Saved legacy Gremlin settings are intentionally left untouched as a recovery copy. On its first load, Nemo Orchestrator can import custom prompts, stage toggles, presets, APIs, models, custom URLs, iteration counts, and Writer Chaos options. The two extensions then maintain independent settings.
 
-### AI Rule Generation in Action
+## Upgrading from an Earlier Release
 
-1.  Enable both Static and Dynamic modes.
-2.  Chat with your character as you normally would.
-3.  As the AI repeats itself, Prose Polisher silently counts the phrases in the background.
-4.  Once a phrase is identified as slop, you can either:
-    *   Wait for the trigger count to be met, and let the AI generate a rule automatically.
-    *   Click "Generate AI Rules from Analysis" to force the process immediately.
-5.  A toast notification will inform you that the AI is working.
-6.  Once complete, a success message will appear, and the new rules will be visible (and active!) in the Regex Navigator.
+- Existing Prose Polisher rules and analysis settings are retained.
+- Existing Project Gremlin settings remain stored but are inactive in Prose Polisher.
+- Install Nemo Orchestrator before deleting any legacy settings you may want to migrate.
+- Generated rules now default to disabled even if an older release activated them automatically.
+- Review existing broad rules after upgrading; Version 6’s validator is intentionally stricter.
 
----
+## Testing
 
-## For Power Users
+Run the automated suite from the extension directory:
 
-### Manually Adding Static Rules
+```bash
+npm test
+```
 
-If you have a set of regex fixes you always want to use, you can add them to the core ruleset.
+The suite covers global Regex Processor synchronization, settings normalization, prompt contracts, legacy rule parsing, capture substitution, previews, grounded compatibility evidence, and semantic-safety validation.
 
-1.  Navigate to `/public/scripts/extensions/third-party/ProsePolisher/`.
-2.  Open `regex_rules.json` in a text editor.
-3.  Add your new rule object to the JSON array, following the existing format. A valid rule requires an `id`, `scriptName`, `findRegex`, and `replaceString`.
-    ```json
-    {
-        "id": "STATIC_999",
-        "scriptName": "Slopfix - My Custom Fix",
-        "findRegex": "\\b([Hh]e|[Ss]he) let out a breath (?:[Hh]e|[Ss]he) didn't know (?:[Hh]e|[Ss]he) was holding\\b",
-        "replaceString": "{{random:$1 exhaled sharply,A sigh escaped $1 lips,with a sudden release of breath}}",
-        "disabled": false,
-        "isStatic": true
-    }
-    ```
-4.  Restart SillyTavern for the new static rules to be loaded.
+The modernization release is also checked against the current SillyTavern extension paths, host event names, settings anchors, and module graph.
 
-### Understanding the AI Prompt
+## Troubleshooting
 
-Curious how the dynamic rules are made? The extension uses a detailed system prompt to instruct the LLM. You can find the full prompt in `content.js` inside the `generateAndSaveDynamicRules` function. This allows you to see the exact instructions the AI follows and even modify them if you wish to experiment.
+**Rules are not appearing in the Regex Processor**
 
----
+Confirm Global Regex integration is enabled, the relevant static or dynamic mode is enabled, and the individual rule is not disabled.
 
-## Troubleshooting & FAQ
+**Dynamic analysis has not produced candidates**
 
-*   **Q: The AI-generated rules aren't very good!**
-    *   **A:** The quality of the generated rules depends heavily on the LLM used for generation (`deepseek-reasoning` by default). You can edit or delete any bad rule via the Regex Navigator. You can also try editing the system prompt in `content.js` to give the AI better instructions.
+Repetition must meet the configured threshold. Use **Analyze Chat History** and **View Frequency Data** to inspect the evidence directly.
 
-*   **Q: The extension isn't doing anything.**
-    *   **A:** Make sure you have enabled the toggles in the settings panel. If using dynamic mode, remember that it takes several repetitions of a phrase before a rule is even considered for creation. Try using the "Analyze Chat History" button to kickstart the process.
+**Generated rules are disabled**
 
-*   **Q: I see `(PP)` rules in the main Regex settings, but I can't edit them there.**
-    *   **A:** This is intentional. Prose Polisher's rules are hidden from the standard Regex Processor UI to avoid clutter and confusion. **Always** use the **Prose Polisher Regex Navigator** to manage its rules.
+This is the expected review-first behavior. Preview the rule in the Regex Navigator and enable it when satisfied.
 
----
+**Generation fails**
+
+Prose Polisher uses the current SillyTavern connection through `/gen`. Confirm that the active API and model can generate normally.
+
+**Project Gremlin controls disappeared**
+
+They moved to Nemo Orchestrator. Prose Polisher retains only the saved migration data.
 
 ## Contributing
 
-Feedback, bug reports, and pull requests are welcome!
-
-1.  **Suggestions & Bug Reports:** Please open an issue on the GitHub repository, providing as much detail as possible.
-2.  **New Static Rules:** If you have a high-quality regex for a common cliché, feel free to open a pull request to add it to the `regex_rules.json` file for everyone to use.
-
----
+Bug reports and focused pull requests are welcome. When proposing a replacement rule, include complete example sentences and explain the exact grammatical and semantic invariant the rule preserves.
