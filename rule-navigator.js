@@ -218,7 +218,8 @@ export class RuleNavigator {
         const validation = editor.querySelector('#pp_editor_validation');
         const results = editor.querySelector('#pp_editor_preview_results');
         validation.textContent = preview.valid
-            ? `${preview.examples.length} example match${preview.examples.length === 1 ? '' : 'es'} found.`
+            ? preview.warnings[0] ||
+                `${preview.examples.length} example match${preview.examples.length === 1 ? '' : 'es'} found.`
             : preview.errors.join(' ');
         validation.classList.toggle('is-valid', preview.valid);
         validation.classList.toggle('is-invalid', !preview.valid);
