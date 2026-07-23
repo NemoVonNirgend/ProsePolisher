@@ -4,7 +4,8 @@ import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 
 // Local module imports
 import { Analyzer } from './analyzer.js';
-import { normalizeRule, parseAlternatives, previewRule, validateRule } from './rule-utils.js';
+import { RuleNavigator } from './rule-navigator.js';
+import { bindSettingsUi, normalizeSettings } from './settings.js';
 import {
     PROSE_POLISHER_RULE_PREFIX,
     syncGlobalRegexRules,
@@ -12,7 +13,7 @@ import {
 
 // 1. CONFIGURATION AND STATE
 // -----------------------------------------------------------------------------
-export const EXTENSION_NAME = "ProsePolisher";
+export const EXTENSION_NAME = 'ProsePolisher';
 const LOG_PREFIX = `[${EXTENSION_NAME}]`;
 const EXTENSION_FOLDER_PATH = `scripts/extensions/third-party/${EXTENSION_NAME}`;
 const PROSE_POLISHER_ID_PREFIX = PROSE_POLISHER_RULE_PREFIX;
@@ -60,33 +61,6 @@ For each identified phrase, create a JavaScript regular expression (regex) that 
 \`\`\`
 Do NOT include any other text or commentary in your response, only the JSON array.`;
 
-const defaultSettings = {
-    // Prose Polisher - Regex & Learning
-    isStaticEnabled: true,
-    isDynamicEnabled: true,
-    integrateWithGlobalRegex: true,
-    dynamicTriggerCount: 30,
-    regexGenerationInstructions: '',
-    skipTriageCheck: false,
-    autoActivateGeneratedRules: false,
-
-    // Prose Polisher - Analysis Engine
-    slopThreshold: 5.0,
-    leaderboardUpdateCycle: 10,
-    pruningCycle: 20,
-    ngramMax: 7,
-    patternMinCommon: 2,
-
-    blacklist: {
-        'ozone': 3,
-        'whisper': 3,
-        'shivers': 3,
-        'obsidian': 3,
-        'white knuckles': 3,
-        'head ducked': 3,
-    },
-};
-
 // 2. HELPER FUNCTIONS (Prose Polisher - UI & Rule Management)
 // -----------------------------------------------------------------------------
 
@@ -98,7 +72,7 @@ function getCompiledRegexes() {
     return rulesToCompile.map(rule => {
         try { return new RegExp(rule.findRegex, 'i'); } catch (e) { return null; }
     }).filter(Boolean);
-};
+}
 
 function compileInternalActiveRules() {
     const settings = extension_settings[EXTENSION_NAME];
@@ -380,8 +354,8 @@ async function triggerDynamicRuleGenerationIfNeeded() {
             }
         } catch (error) {
             console.error(`${LOG_PREFIX} Error in auto-trigger pre-screening chain:`, error);
-            window.toastr.error("Error during auto-trigger pre-screening. See console.");
-            return; 
+            window.toastr.error('Error during auto-trigger pre-screening. See console.');
+            return;
         }
 
         if (validCandidatesForGeneration.length === 0) {
@@ -405,7 +379,7 @@ async function triggerDynamicRuleGenerationIfNeeded() {
             );
         } catch (error) {
             console.error(`${LOG_PREFIX} Error during auto-triggered rule generation:`, error);
-            window.toastr.error("An error occurred during auto rule generation. See console.");
+            window.toastr.error('An error occurred during auto rule generation. See console.');
         } finally {
             prosePolisherAnalyzer.isProcessingAiRules = false;
         }
@@ -431,234 +405,10 @@ async function triggerDynamicRuleGenerationIfNeeded() {
     }
 }
 
-// RegexNavigator class
-class RegexNavigator {
-    constructor() {}
-    async open() {
-        if (!isAppReady) { window.toastr.info("SillyTavern is still loading, please wait."); return; }
-        dynamicRules.forEach(rule => delete rule.isNew);
-        const container = document.createElement('div');
-        container.className = 'prose-polisher-navigator-content';
-        container.id = 'prose-polisher-navigator-content-id';
-        container.innerHTML = `
-            <div class="modal-header"><h2>Regex Rule Navigator</h2></div>
-            <div class="navigator-body"><div class="navigator-main-panel"><div id="regex-navigator-list-view"></div></div></div>
-            <div class="modal-footer"><button id="prose-polisher-new-rule-btn" class="menu_button"><i class="fa-solid fa-plus"></i> New Dynamic Rule</button></div>`;
-        this.renderRuleList(container);
-        container.querySelector('#prose-polisher-new-rule-btn').addEventListener('pointerup', () => this.openRuleEditor(null));
-        callGenericPopup(container, POPUP_TYPE.DISPLAY, 'Regex Rule Navigator', { wide: true, large: true, addCloseButton: true });
-    }
-    renderRuleList(container = null) {
-        if (!isAppReady) return;
-        const modalContent = container || document.getElementById('prose-polisher-navigator-content-id');
-        if (!modalContent) return;
-        const listView = modalContent.querySelector('#regex-navigator-list-view');
-        listView.innerHTML = '';
-        const allRules = [...staticRules, ...dynamicRules.sort((a,b) => (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0) || (a.scriptName.localeCompare(b.scriptName)))];
-        if (allRules.length === 0) {
-            listView.innerHTML = "<p style='text-align:center; padding:20px;'>No rules defined.</p>";
-            return;
-        }
-        for (const rule of allRules) {
-            const item = document.createElement('div');
-            item.className = 'regex-navigator-item';
-            item.classList.toggle('is-dynamic', !rule.isStatic);
-            item.classList.toggle('is-disabled', rule.disabled);
-            item.classList.toggle('is-newly-added', !!rule.isNew);
-            const ruleId = rule.id || (rule.scriptName ? PROSE_POLISHER_ID_PREFIX + rule.scriptName.replace(/\s+/g, '_') : PROSE_POLISHER_ID_PREFIX + `rule_${Date.now()}`);
-            item.dataset.id = ruleId;
-            if (!rule.id) rule.id = ruleId; 
-            const iconWrap = document.createElement('div');
-            iconWrap.className = 'item-icon';
-            const icon = document.createElement('i');
-            icon.className = `fa-solid ${rule.isStatic ? 'fa-database' : 'fa-wand-magic-sparkles'}`;
-            iconWrap.appendChild(icon);
-
-            const details = document.createElement('div');
-            details.className = 'item-details';
-            const name = document.createElement('div');
-            name.className = 'script-name';
-            name.textContent = rule.scriptName || '(No Name)';
-            const regex = document.createElement('div');
-            regex.className = 'find-regex';
-            regex.textContent = rule.findRegex || '';
-            details.append(name, regex);
-
-            if (rule.semanticInvariant) {
-                const invariant = document.createElement('div');
-                invariant.className = 'pp-rule-invariant';
-                invariant.textContent = rule.semanticInvariant;
-                details.appendChild(invariant);
-            }
-
-            const status = document.createElement('div');
-            status.className = 'item-status';
-            const type = document.createElement('span');
-            type.textContent = rule.isStatic ? 'Static' : 'Dynamic';
-            status.appendChild(type);
-            if (rule.risk) {
-                const risk = document.createElement('span');
-                risk.className = `pp-rule-risk risk-${rule.risk}`;
-                risk.textContent = `${rule.risk} risk`;
-                status.appendChild(risk);
-            }
-            const toggle = document.createElement('i');
-            toggle.className = `fa-solid ${rule.disabled ? 'fa-toggle-off' : 'fa-toggle-on'} status-toggle-icon`;
-            toggle.title = 'Toggle Enable/Disable';
-            status.appendChild(toggle);
-            item.append(iconWrap, details, status);
-            item.addEventListener('pointerup', (e) => {
-                const currentRuleId = item.dataset.id;
-                if (e.target.closest('.status-toggle-icon')) { this.toggleRuleStatus(currentRuleId); }
-                else { this.openRuleEditor(currentRuleId); }
-            });
-            listView.appendChild(item);
-        }
-    }
-    async toggleRuleStatus(ruleId) {
-        if (!isAppReady) { console.warn(`${LOG_PREFIX} toggleRuleStatus called before app ready.`); return; }
-        let rule = dynamicRules.find(r => r.id === ruleId);
-        if (!rule) rule = staticRules.find(r => r.id === ruleId);
-        if (rule) {
-            rule.disabled = !rule.disabled;
-            if (!rule.isStatic) {
-                extension_settings[EXTENSION_NAME].dynamicRules = dynamicRules; 
-                saveSettingsDebounced(); 
-            }
-            this.renderRuleList(); 
-            await updateGlobalRegexArray();
-            window.toastr.success(`Rule "${rule.scriptName}" ${rule.disabled ? 'disabled' : 'enabled'}.`);
-        } else {
-            console.warn(`${LOG_PREFIX} Rule with ID ${ruleId} not found for toggling.`);
-        }
-    }
-    async openRuleEditor(ruleId) {
-        if (!isAppReady) { window.toastr.info("SillyTavern is still loading, please wait."); return; }
-        const isNew = ruleId === null;
-        let rule;
-        if (isNew) {
-            rule = { id: `DYN_${Date.now()}_${Math.random().toString(36).substr(2,5)}`, scriptName: '', findRegex: '', alternatives: [], replaceString: '', disabled: true, isStatic: false, isNew: true };
-        } else {
-            rule = dynamicRules.find(r => r.id === ruleId) || staticRules.find(r => r.id === ruleId);
-        }
-        if (!rule) { console.error(`${LOG_PREFIX} Rule not found for editing: ${ruleId}`); return; }
-        const editorContent = document.createElement('div');
-        editorContent.className = 'prose-polisher-rule-editor-popup';
-        editorContent.dataset.ruleId = rule.id;
-        editorContent.innerHTML = `
-            <label for="pp_editor_name">Rule Name</label>
-            <input type="text" id="pp_editor_name" class="text_pole" ${rule.isStatic ? 'disabled' : ''}>
-            <label for="pp_editor_find">Find Regex (JavaScript format)</label>
-            <textarea id="pp_editor_find" class="text_pole" ${rule.isStatic ? 'disabled' : ''}></textarea>
-            <label for="pp_editor_alternatives">Replacement alternatives (one per line)</label>
-            <textarea id="pp_editor_alternatives" class="text_pole" ${rule.isStatic ? 'disabled' : ''}></textarea>
-            <button id="pp_editor_preview" class="menu_button" type="button">Preview Against Current Chat</button>
-            <div id="pp_editor_validation" class="pp-rule-validation" aria-live="polite"></div>
-            <div id="pp_editor_preview_results" class="pp-rule-preview-results"></div>
-            <div class="editor-actions">
-                <div class="actions-left"><label class="checkbox_label"><input type="checkbox" id="pp_editor_disabled" ${rule.disabled ? 'checked' : ''}><span>Disabled</span></label></div>
-                ${!rule.isStatic ? '<button id="pp_editor_delete" class="menu_button is_dangerous">Delete Rule</button>' : ''}
-            </div>`;
-        const nameInput = editorContent.querySelector('#pp_editor_name');
-        const findInput = editorContent.querySelector('#pp_editor_find');
-        const alternativesInput = editorContent.querySelector('#pp_editor_alternatives');
-        nameInput.value = rule.scriptName || '';
-        findInput.value = rule.findRegex || '';
-        alternativesInput.value = parseAlternatives(rule).join('\n');
-
-        editorContent.querySelector('#pp_editor_preview').addEventListener('pointerup', () => {
-            const candidate = normalizeRule({
-                scriptName: nameInput.value,
-                findRegex: findInput.value,
-                alternatives: alternativesInput.value.split('\n').map(value => value.trim()).filter(Boolean),
-            });
-            const chatText = (getContext().chat || [])
-                .filter(message => !message.is_user)
-                .map(message => message.mes || '')
-                .join('\n\n');
-            const preview = previewRule(chatText, candidate);
-            const validationElement = editorContent.querySelector('#pp_editor_validation');
-            const resultsElement = editorContent.querySelector('#pp_editor_preview_results');
-            validationElement.textContent = preview.valid
-                ? `${preview.examples.length} example match${preview.examples.length === 1 ? '' : 'es'} found.`
-                : preview.errors.join(' ');
-            validationElement.classList.toggle('is-valid', preview.valid);
-            validationElement.classList.toggle('is-invalid', !preview.valid);
-            resultsElement.replaceChildren();
-            for (const example of preview.examples) {
-                const card = document.createElement('div');
-                card.className = 'pp-rule-preview-card';
-                const before = document.createElement('div');
-                const after = document.createElement('div');
-                before.textContent = `Before: ${example.before}`;
-                after.textContent = `After: ${example.after}`;
-                card.append(before, after);
-                resultsElement.appendChild(card);
-            }
-        });
-        const deleteBtn = editorContent.querySelector('#pp_editor_delete');
-        if (deleteBtn) {
-            deleteBtn.addEventListener('pointerup', async (e) => {
-                e.stopPropagation();
-                const editorPopup = deleteBtn.closest('.popup_confirm');
-                if (await callGenericPopup('Are you sure you want to to delete this rule?', POPUP_TYPE.CONFIRM)) {
-                    await this.handleDelete(rule.id);
-                    editorPopup?.querySelector('.popup-button-cancel')?.click();
-                }
-            });
-        }
-        if (await callGenericPopup(editorContent, POPUP_TYPE.CONFIRM, isNew ? 'Create New Rule' : 'Edit Rule', { wide: true, large: true })) {
-            const disabledInput = editorContent.querySelector('#pp_editor_disabled');
-            rule.disabled = disabledInput.checked;
-            if (!rule.isStatic) {
-                if (!nameInput.value.trim() || !findInput.value.trim()) { window.toastr.error("Rule Name and Find Regex cannot be empty."); this.openRuleEditor(rule.id); return; }
-                const normalized = normalizeRule({
-                    ...rule,
-                    scriptName: nameInput.value.trim(),
-                    findRegex: findInput.value.trim(),
-                    alternatives: alternativesInput.value.split('\n').map(value => value.trim()).filter(Boolean),
-                });
-                const validation = validateRule(normalized);
-                if (!validation.valid) {
-                    window.toastr.error(validation.errors.join(' '));
-                    this.openRuleEditor(rule.id);
-                    return;
-                }
-                Object.assign(rule, normalized);
-            }
-            if (isNew && !rule.isStatic) dynamicRules.push(rule);
-            
-            if (!rule.isStatic) {
-                 extension_settings[EXTENSION_NAME].dynamicRules = dynamicRules;
-                 saveSettingsDebounced();
-            }
-            this.renderRuleList();
-            await updateGlobalRegexArray();
-            window.toastr.success(isNew ? "New rule created." : "Rule updated.");
-            showReloadPrompt();
-        }
-    }
-    async handleDelete(ruleId) {
-        if (!isAppReady) { console.warn(`${LOG_PREFIX} handleDelete called before app ready.`); return; }
-        const index = dynamicRules.findIndex(r => r.id === ruleId);
-        if (index !== -1) {
-            dynamicRules.splice(index, 1);
-            extension_settings[EXTENSION_NAME].dynamicRules = dynamicRules;
-            saveSettingsDebounced();
-            this.renderRuleList();
-            await updateGlobalRegexArray();
-            window.toastr.success("Dynamic rule deleted.");
-            showReloadPrompt();
-        } else {
-            console.warn(`${LOG_PREFIX} Dynamic rule with ID ${ruleId} not found for deletion.`);
-        }
-    }
-}
-
 // APP_READY Management
 async function runReadyQueue() {
     isAppReady = true;
-    window.isAppReady = true; 
+    window.isAppReady = true;
     console.log(`${LOG_PREFIX} APP_READY event received. Running queued tasks (${readyQueue.length}).`);
     while (readyQueue.length > 0) {
         const task = readyQueue.shift();
@@ -680,123 +430,50 @@ function queueReadyTask(task) {
 async function initializeExtensionCore() {
     try {
         console.log(`${LOG_PREFIX} Initializing core components...`);
-        extension_settings[EXTENSION_NAME] = { ...defaultSettings, ...extension_settings[EXTENSION_NAME] };
+        extension_settings[EXTENSION_NAME] = normalizeSettings(extension_settings[EXTENSION_NAME]);
         const settings = extension_settings[EXTENSION_NAME];
-        dynamicRules = settings.dynamicRules || []; 
+        dynamicRules = settings.dynamicRules || [];
+        settings.dynamicRules = dynamicRules;
         dynamicRules.forEach(rule => { if (!rule.id) rule.id = `DYN_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`; });
         const staticResponse = await fetch(`${EXTENSION_FOLDER_PATH}/regex_rules.json`);
-        if (!staticResponse.ok) throw new Error("Failed to fetch regex_rules.json");
+        if (!staticResponse.ok) throw new Error('Failed to fetch regex_rules.json');
         staticRules = await staticResponse.json();
-        staticRules.forEach(rule => { if (!rule.id) rule.id = (rule.scriptName ? PROSE_POLISHER_ID_PREFIX + rule.scriptName.replace(/\s+/g, '_') : PROSE_POLISHER_ID_PREFIX + `staticrule_${Math.random().toString(36).substr(2,5)}`) + '_static'; });
+        staticRules.forEach(rule => { if (!rule.id) rule.id = (rule.scriptName ? PROSE_POLISHER_ID_PREFIX + rule.scriptName.replace(/\s+/g, '_') : PROSE_POLISHER_ID_PREFIX + `staticrule_${Math.random().toString(36).substr(2, 5)}`) + '_static'; });
 
         const settingsHtml = await fetch(`${EXTENSION_FOLDER_PATH}/settings.html`).then(res => res.text());
         document.getElementById('extensions_settings').insertAdjacentHTML('beforeend', settingsHtml);
 
         prosePolisherAnalyzer = new Analyzer(
             settings, callGenericPopup, POPUP_TYPE, window.toastr, saveSettingsDebounced,
-            compileInternalActiveRules, updateGlobalRegexArray, getCompiledRegexes() 
+            compileInternalActiveRules, updateGlobalRegexArray, getCompiledRegexes(),
         );
-        
-        const staticToggle = document.getElementById('prose_polisher_enable_static');
-        const dynamicToggle = document.getElementById('prose_polisher_enable_dynamic');
-        const triggerInput = document.getElementById('prose_polisher_dynamic_trigger');
-        const globalRegexToggle = document.getElementById('prose_polisher_enable_global_regex');
-        staticToggle.checked = settings.isStaticEnabled;
-        dynamicToggle.checked = settings.isDynamicEnabled;
-        triggerInput.value = settings.dynamicTriggerCount;
-        if (globalRegexToggle) { 
-            globalRegexToggle.checked = settings.integrateWithGlobalRegex;
-            globalRegexToggle.addEventListener('change', async () => { 
-                settings.integrateWithGlobalRegex = globalRegexToggle.checked; 
-                saveSettingsDebounced(); 
-                await updateGlobalRegexArray(); 
-                const regexListContainer = document.getElementById('saved_regex_scripts');
-                if (regexListContainer) {
-                    hideRulesInStandardUI();
-                }
-                showReloadPrompt();
-            });
-        }
-        staticToggle.addEventListener('change', async () => { 
-            settings.isStaticEnabled = staticToggle.checked; 
-            saveSettingsDebounced(); 
-            await updateGlobalRegexArray(); 
-            showReloadPrompt();
-        });
-        dynamicToggle.addEventListener('change', async () => {
-            settings.isDynamicEnabled = dynamicToggle.checked;
-            if(!dynamicToggle.checked && prosePolisherAnalyzer) prosePolisherAnalyzer.messageCounterForTrigger = 0; 
-            saveSettingsDebounced();
-            await updateGlobalRegexArray();
-            showReloadPrompt();
-        });
-        triggerInput.addEventListener('input', () => {
-            const value = parseInt(triggerInput.value, 10);
-            if (!isNaN(value) && value >= 1) { settings.dynamicTriggerCount = value; saveSettingsDebounced(); }
-        });
 
-        // Bind new analysis settings
-        const slopThresholdInput = document.getElementById('prose_polisher_slop_threshold');
-        const leaderboardUpdateCycleInput = document.getElementById('prose_polisher_leaderboard_update_cycle');
-        const pruningCycleInput = document.getElementById('prose_polisher_pruning_cycle');
-        const ngramMaxInput = document.getElementById('prose_polisher_ngram_max');
-        const patternMinCommonInput = document.getElementById('prose_polisher_pattern_min_common');
-
-        slopThresholdInput.value = settings.slopThreshold;
-        leaderboardUpdateCycleInput.value = settings.leaderboardUpdateCycle;
-        pruningCycleInput.value = settings.pruningCycle;
-        ngramMaxInput.value = settings.ngramMax;
-        patternMinCommonInput.value = settings.patternMinCommon;
-
-        slopThresholdInput.addEventListener('input', () => {
-            const value = parseFloat(slopThresholdInput.value);
-            if (!isNaN(value) && value >= 1) { settings.slopThreshold = value; saveSettingsDebounced(); }
-        });
-        leaderboardUpdateCycleInput.addEventListener('input', () => {
-            const value = parseInt(leaderboardUpdateCycleInput.value, 10);
-            if (!isNaN(value) && value >= 1) { settings.leaderboardUpdateCycle = value; saveSettingsDebounced(); }
-        });
-        pruningCycleInput.addEventListener('input', () => {
-            const value = parseInt(pruningCycleInput.value, 10);
-            if (!isNaN(value) && value >= 5) { settings.pruningCycle = value; saveSettingsDebounced(); }
-        });
-        ngramMaxInput.addEventListener('input', () => {
-            const value = parseInt(ngramMaxInput.value, 10);
-            if (!isNaN(value) && value >= 3 && value <= 20) { settings.ngramMax = value; saveSettingsDebounced(); }
-        });
-        patternMinCommonInput.addEventListener('input', () => {
-            const value = parseInt(patternMinCommonInput.value, 10);
-            if (!isNaN(value) && value >= 2 && value <= 10) { settings.patternMinCommon = value; saveSettingsDebounced(); }
-        });
-
-        regexNavigator = new RegexNavigator();
-        document.getElementById('prose_polisher_open_navigator_button').addEventListener('pointerup', () => regexNavigator.open());
-        document.getElementById('prose_polisher_analyze_chat_button').addEventListener('pointerup', () => prosePolisherAnalyzer?.manualAnalyzeChatHistory());
-        document.getElementById('prose_polisher_view_frequency_button').addEventListener('pointerup', () => prosePolisherAnalyzer?.showFrequencyLeaderboard());
-        document.getElementById('prose_polisher_generate_rules_button').addEventListener('pointerup', () => prosePolisherAnalyzer?.handleGenerateRulesFromAnalysisClick(dynamicRules, regexNavigator));
-        document.getElementById('prose_polisher_manage_whitelist_button').addEventListener('pointerup', () => prosePolisherAnalyzer?.showWhitelistManager());
-        document.getElementById('prose_polisher_manage_blacklist_button').addEventListener('pointerup', () => prosePolisherAnalyzer?.showBlacklistManager());
-        document.getElementById('prose_polisher_clear_frequency_button').addEventListener('pointerup', () => prosePolisherAnalyzer?.clearFrequencyData());
-        document.getElementById('prose_polisher_edit_regex_gen_prompt_button').addEventListener('pointerup', showRegexGenerationPromptEditor);
-
-        const skipTriageCheck = document.getElementById('pp_skip_triage_check');
-        if (skipTriageCheck) {
-            skipTriageCheck.checked = settings.skipTriageCheck;
-            skipTriageCheck.addEventListener('change', () => {
-                settings.skipTriageCheck = skipTriageCheck.checked;
+        regexNavigator = new RuleNavigator({
+            callPopup: callGenericPopup,
+            popupType: POPUP_TYPE,
+            toastr: window.toastr,
+            isReady: () => isAppReady,
+            getChat: () => getContext().chat,
+            getStaticRules: () => staticRules,
+            getDynamicRules: () => dynamicRules,
+            persistDynamicRules: () => {
+                settings.dynamicRules = dynamicRules;
                 saveSettingsDebounced();
-            });
-        }
-
-        const autoActivateGeneratedRules = document.getElementById('pp_auto_activate_generated_rules');
-        if (autoActivateGeneratedRules) {
-            autoActivateGeneratedRules.checked = settings.autoActivateGeneratedRules;
-            autoActivateGeneratedRules.addEventListener('change', () => {
-                settings.autoActivateGeneratedRules = autoActivateGeneratedRules.checked;
-                saveSettingsDebounced();
-            });
-        }
-
+            },
+            updateGlobalRegex: updateGlobalRegexArray,
+            showReloadPrompt,
+            ruleIdPrefix: PROSE_POLISHER_ID_PREFIX,
+        });
+        bindSettingsUi({
+            settings,
+            analyzer: prosePolisherAnalyzer,
+            navigator: regexNavigator,
+            saveSettings: saveSettingsDebounced,
+            updateGlobalRegex: updateGlobalRegexArray,
+            hideGlobalRules: hideRulesInStandardUI,
+            showReloadPrompt,
+            showPromptEditor: showRegexGenerationPromptEditor,
+        });
 
         queueReadyTask(async () => {
             // Legacy Gremlin settings remain untouched in extension_settings so
@@ -811,7 +488,7 @@ async function initializeExtensionCore() {
             });
 
             await updateGlobalRegexArray();
-            compileInternalActiveRules(); 
+            compileInternalActiveRules();
 
             // More robustly find and hide the ProsePolisher rules from the main regex UI.
             // This observes the body for when the regex list is added to the DOM,
@@ -829,12 +506,12 @@ async function initializeExtensionCore() {
         });
     } catch (error) {
         console.error(`${LOG_PREFIX} Critical failure during core initialization:`, error);
-        window.toastr.error("Prose Polisher failed to initialize core components. See console.");
+        window.toastr.error('Prose Polisher failed to initialize core components. See console.');
     }
 }
 
 $(document).ready(() => {
     console.log(`${LOG_PREFIX} Document ready. Starting initialization...`);
-    eventSource.on(event_types.APP_READY, runReadyQueue); 
-    setTimeout(initializeExtensionCore, 100); 
+    eventSource.on(event_types.APP_READY, runReadyQueue);
+    setTimeout(initializeExtensionCore, 100);
 });
