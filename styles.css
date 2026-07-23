@@ -435,3 +435,8 @@
 .pp-migration-notice a {
     color: var(--SmartThemeQuoteColor);
 }
+
+#pp_legacy_gremlin_settings,
+#pp_gremlin_toggle {
+    display: none !important;
+}
