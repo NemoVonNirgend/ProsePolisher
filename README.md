@@ -4,7 +4,7 @@ Prose Polisher is a repetition analyzer and correction-rule manager for SillyTav
 
 Version 6 changes the safety model: newly generated rules are held disabled for review unless the user explicitly enables automatic activation.
 
-> **Project Gremlin migration:** The bundled multi-model generation pipeline is moving to [Nemo Orchestrator](https://github.com/NemoVonNirgend/NemoOrchestrator). It remains temporarily in the modernization branch so existing configurations can be migrated after feature-parity testing.
+> **Project Gremlin migration:** The multi-model generation pipeline has moved to [Nemo Orchestrator](https://github.com/NemoVonNirgend/NemoOrchestrator). Nemo Orchestrator automatically imports existing custom stage settings from Prose Polisher; the saved source settings are left intact as a recovery copy.
 
 ## Table of Contents
 - [Key Features](#key-features)
