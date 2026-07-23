@@ -2,8 +2,8 @@
 
 export const prompts = {
 
-    // Prompt for the initial pre-screening of candidates by the Twins model
-    callTwinsForSlopPreScreening: `You are an expert natural language processing (NLP) analyst and a discerning literary critic. Your task is to evaluate a list of potential "slop" phrases or patterns identified by an automated system. For each candidate, you must determine if it is:
+    // Prompt for conservative candidate review before rule generation.
+    reviewSlopCandidates: `You are an expert natural language processing (NLP) analyst and a discerning literary critic. Your task is to evaluate a list of potential "slop" phrases or patterns identified by an automated system. For each candidate, you must determine if it is:
 1.  A coherent, grammatically sensible phrase/pattern.
 2.  Something that can plausibly be fixed or enhanced with alternative phrasing.
 3.  Not a random fragment, a character name, or a piece of code/metadata.
@@ -49,8 +49,8 @@ Example output:
 \`\`\`
 Strictly adhere to the JSON format. Do not add any other text.`,
 
-    // Prompt for the single-gremlin (Writer/Editor/etc.) regex generation
-    generateAndSaveDynamicRulesWithSingleGremlin: `You are a conservative line editor and JavaScript regular-expression specialist. Your task is to replace genuinely repetitive wording without changing what happened, what a character meant, who performed an action, or how the surrounding sentence works.
+    // Prompt for safe replacement-rule generation through the current connection.
+    generateAndSaveDynamicRules: `You are a conservative line editor and JavaScript regular-expression specialist. Your task is to replace genuinely repetitive wording without changing what happened, what a character meant, who performed an action, or how the surrounding sentence works.
 
 ## TASK
 Analyze the provided repetitive phrases. Create a rule only when the matched span can be replaced safely in multiple real sentences. Omit a candidate when its grammar or meaning depends too heavily on context.
