@@ -155,6 +155,14 @@ export function validateGeneratedRule(rule, minimumAlternatives = 1, groundedCon
     if (testCases.length < 3) {
         errors.push(`Generated rules require at least 3 compatibility test cases; found ${testCases.length}.`);
     }
+    const distinctTestCases = new Set(
+        testCases.map(testCase => testCase.replace(/\s+/g, ' ').toLowerCase()),
+    );
+    if (distinctTestCases.size < 3) {
+        errors.push(
+            `Generated rules require at least 3 distinct compatibility test cases; found ${distinctTestCases.size}.`,
+        );
+    }
     if (testCases.some(testCase => !/[.!?]["')\]]?$/.test(testCase))) {
         errors.push('Generated compatibility tests must be complete sentences with terminal punctuation.');
     }
