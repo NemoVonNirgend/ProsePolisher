@@ -509,7 +509,7 @@ export class Analyzer {
                     }
 
                     rule.id = `DYN_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-                    rule.disabled = rule.disabled ?? false;
+                    rule.disabled = !this.settings.autoActivateGeneratedRules;
                     rule.isStatic = false;
                     rule.isNew = true;
                     rule.replaceString = finalReplaceString; // Use the correctly formatted string
@@ -611,7 +611,7 @@ export class Analyzer {
                         scriptName: lastValidOutput.scriptName,
                         findRegex: lastValidOutput.findRegex,
                         replaceString: finalReplaceString,
-                        disabled: false,
+                        disabled: !this.settings.autoActivateGeneratedRules,
                         isStatic: false,
                         isNew: true,
                     };
