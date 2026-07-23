@@ -1,6 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import { generateText } from './generation.js';
+import { normalizeRule, validateRule } from './rule-utils.js';
 import { prompts } from './prompts.js'; // <-- IMPORT THE NEW PROMPTS FILE
 
 // Import all new and existing data files
@@ -473,31 +474,12 @@ export class Analyzer {
                 return 0;
             }
 
-            for (const rule of newRules) {
-                if (rule && rule.scriptName && rule.findRegex && rule.replaceString) {
-                    try { new RegExp(rule.findRegex); } catch (e) { console.warn(`${LOG_PREFIX} AI generated an invalid regex for rule '${rule.scriptName}', skipping: ${e.message}`); continue; }
-                    
-                    let alternativesArray = [];
-                    let finalReplaceString = '';
-
-                    // Sanitize first to handle `{ {` cases
-                    let processedString = rule.replaceString.replace(/\{\s*\{/g, '{{').replace(/\}\s*\}/g, '}}').replace(/\{\{\s*random:/, '{{random:');
-
-                    const alternativesMatch = processedString.match(/^\{\{random:([\s\S]+?)\}\}$/);
-
-                    if (alternativesMatch && alternativesMatch[1]) {
-                        // Case 1: The wrapper exists, parse from it.
-                        alternativesArray = alternativesMatch[1].split(',').map(s => s.trim()).filter(s => s);
-                        finalReplaceString = processedString;
-                    } else {
-                        // Case 2: The wrapper is missing. Assume the whole string is the list.
-                        const rawAlternatives = processedString.replace(/^"|"$/g, '');
-                        alternativesArray = rawAlternatives.split(',').map(s => s.trim()).filter(s => s);
-                        finalReplaceString = `{{random:${alternativesArray.join(',')}}}`;
-                    }
-
-                    if (alternativesArray.length < MIN_ALTERNATIVES_PER_RULE) {
-                        console.warn(`${LOG_PREFIX} AI rule '${rule.scriptName}' has insufficient alternatives (found ${alternativesArray.length}, need ${MIN_ALTERNATIVES_PER_RULE}) or malformed replaceString. Original: "${rule.replaceString}", Skipping.`);
+            for (const candidateRule of newRules) {
+                if (candidateRule?.scriptName && candidateRule?.findRegex && (candidateRule?.alternatives || candidateRule?.replaceString)) {
+                    const rule = normalizeRule(candidateRule);
+                    const validation = validateRule(rule, MIN_ALTERNATIVES_PER_RULE);
+                    if (!validation.valid) {
+                        console.warn(`${LOG_PREFIX} Rejected generated rule '${rule.scriptName}':`, validation.errors);
                         continue;
                     }
 
@@ -505,7 +487,6 @@ export class Analyzer {
                     rule.disabled = !this.settings.autoActivateGeneratedRules;
                     rule.isStatic = false;
                     rule.isNew = true;
-                    rule.replaceString = finalReplaceString; // Use the correctly formatted string
                     dynamicRulesRef.push(rule);
                     addedCount++;
                 }
@@ -574,36 +555,21 @@ export class Analyzer {
                     try { new RegExp(lastValidOutput.findRegex); }
                     catch (e) { console.warn(`${LOG_PREFIX} Iterative Twins produced invalid regex for '${lastValidOutput.scriptName}', skipping: ${e.message}`); continue; }
 
-                    let alternativesArray = [];
-                    let finalReplaceString = '';
-
-                    // Sanitize first to handle `{ {` cases
-                    let processedString = lastValidOutput.replaceString.replace(/\{\s*\{/g, '{{').replace(/\}\s*\}/g, '}}').replace(/\{\{\s*random:/, '{{random:');
-                    const alternativesMatch = processedString.match(/^\{\{random:([\s\S]+?)\}\}$/);
-
-                    if (alternativesMatch && alternativesMatch[1]) {
-                        alternativesArray = alternativesMatch[1].split(',').map(s => s.trim()).filter(s => s);
-                        finalReplaceString = processedString;
-                    } else {
-                        const rawAlternatives = processedString.replace(/^"|"$/g, '');
-                        alternativesArray = rawAlternatives.split(',').map(s => s.trim()).filter(s => s);
-                        finalReplaceString = `{{random:${alternativesArray.join(',')}}}`;
-                    }
-
-                    if (alternativesArray.length < MIN_ALTERNATIVES_PER_RULE) {
-                        console.warn(`${LOG_PREFIX} Iterative Twins rule '${lastValidOutput.scriptName}' has insufficient alternatives (found ${alternativesArray.length}, need ${MIN_ALTERNATIVES_PER_RULE}) or malformed replaceString. Original: "${lastValidOutput.replaceString}", Skipping.`);
-                        continue;
-                    }
-
-                    const newRule = {
+                    const newRule = normalizeRule({
                         id: `DYN_TWIN_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
                         scriptName: lastValidOutput.scriptName,
                         findRegex: lastValidOutput.findRegex,
-                        replaceString: finalReplaceString,
+                        replaceString: lastValidOutput.replaceString,
+                        alternatives: lastValidOutput.alternatives,
                         disabled: !this.settings.autoActivateGeneratedRules,
                         isStatic: false,
                         isNew: true,
-                    };
+                    });
+                    const validation = validateRule(newRule, MIN_ALTERNATIVES_PER_RULE);
+                    if (!validation.valid) {
+                        console.warn(`${LOG_PREFIX} Rejected iterative rule '${newRule.scriptName}':`, validation.errors);
+                        continue;
+                    }
                     dynamicRulesRef.push(newRule);
                     addedCount++;
                     console.log(`${LOG_PREFIX} Iterative Twins successfully generated rule: ${newRule.scriptName}`);
