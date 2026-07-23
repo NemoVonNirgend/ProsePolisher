@@ -468,3 +468,25 @@
     gap: 4px;
     padding: 8px 10px;
 }
+
+.pp-rule-invariant {
+    color: var(--text_color_dim);
+    font-size: 0.82em;
+    margin-top: 4px;
+}
+
+.pp-rule-risk {
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-size: 0.72em;
+    padding: 1px 6px;
+    text-transform: capitalize;
+}
+
+.pp-rule-risk.risk-low {
+    color: #69b985;
+}
+
+.pp-rule-risk.risk-medium {
+    color: #d7a84e;
+}
