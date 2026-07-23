@@ -6,6 +6,7 @@ import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import { Analyzer } from './analyzer.js';
 import { RuleNavigator } from './rule-navigator.js';
 import { bindSettingsUi, normalizeSettings } from './settings.js';
+import { DEFAULT_RULE_GENERATION_PROMPT } from './prompts.js';
 import {
     PROSE_POLISHER_RULE_PREFIX,
     syncGlobalRegexRules,
@@ -27,39 +28,6 @@ let processedMessageIds = new Set();
 
 let isAppReady = false;
 let readyQueue = [];
-
-// --- CONSTANTS ---
-
-// Using a template literal (backticks) to prevent macro processing.
-const DEFAULT_REGEX_GENERATION_INSTRUCTIONS = `You are an expert in natural language processing and JavaScript regular expressions. Your task is to analyze the provided text and identify repetitive phrases or "slop" that can be replaced with more concise, varied, or evocative language.
-
-For each identified phrase, create a JavaScript regular expression (regex) that can accurately find it, and a replacement string. The replacement string MUST use the \`{{random:option1,option2,option3,...}}\` syntax to provide at least 15 wildly different, contextually appropriate, and grammatically correct alternative phrases. These alternatives should offer significant stylistic variation while maintaining the original meaning. They should not be variations of the same phrase, saying, or other wise, but be truely transformative.
-
-**Crucial Considerations:**
-1.  **Pronoun Handling:** Your regex MUST account for different pronouns (e.g., "his", "her", "their", "my", "your", "he", "she", "they", "I", "you"). Use capture groups (e.g., \`([Hh]is|[Hh]er|[Tt]heir)\`) and backreferences (e.g., \`$1\`) in the replacement string to ensure the correct pronoun is used.
-2.  **Combined Phrases:** If a single regex cannot account for all variations of a combined phrase (e.g., "his face paled" and "his knuckles whitened" are often related to fear but are distinct actions), split them into two separate regex rules, each with its own set of 15+ variations.
-3.  **Output Format:** Provide your output STRICTLY as a JSON array of objects. Each object MUST have the following properties:
-    *   \`scriptName\`: A descriptive name for the rule (e.g., "Slopfix - Repetitive Blushing").
-    *   \`findRegex\`: The JavaScript regular expression string.
-    *   \`replaceString\`: The replacement string using the \`{{random:...}}\` syntax. **IMPORTANT**: To prevent the system from misinterpreting the examples, they are shown with a space, like \`{ {random:...} }\`. Your output **MUST** be compact, without any spaces, like \`{{random:...}}\`.
-
-**Examples of Desired Output (Truncated for brevity, but your output should have 15+ options):**
-
-\`\`\`json
-[
-    {
-        "scriptName": "Slopfix - Repetitive Blushing",
-        "findRegex": "\\\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+(cheeks?|face)\\\\s+(?:flushed|bloomed|burned|turned|grew|went)(?:\\\\s+(?:a\\\\s+)?(vibrant|deep|intense|bright|fiery|dark|faint|pale|rosy))?\\\\s*(rose|pink|crimson|scarlet|red)\\\\b",
-        "replaceString": "{ {random:a telltale heat bloomed high on $1 $2,color flooded $1 cheeks like spilled wine,a sudden warmth crept up $1 neck,$1's $2 grew hot beneath the gaze,heat pricked across $1 $2,a rush of betraying color rose on $1 face} }"
-    },
-    {
-        "scriptName": "Slopfix - Breath Hitching/Gasping",
-        "findRegex": "\\\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\\\s+(?:own\\\\s+)?breath\\\\s+(hitched|caught|stuttered)(?:\\\\s+in\\\\s+\\\\1\\\\s+throat)?\\\\b",
-        "replaceString": "{ {random:$1 drew a sharp, audible breath,a small involuntary sound escaped $1 throat,$1's breathing momentarily faltered,$1 inhaled sharply as if stung,air caught in $1 chest like a snag} }"
-    }
-]
-\`\`\`
-Do NOT include any other text or commentary in your response, only the JSON array.`;
 
 // 2. HELPER FUNCTIONS (Prose Polisher - UI & Rule Management)
 // -----------------------------------------------------------------------------
@@ -225,7 +193,7 @@ async function showRegexGenerationPromptEditor() {
 
     const settings = extension_settings[EXTENSION_NAME];
     const popupContent = document.createElement('div');
-    const instructions = settings.regexGenerationInstructions || DEFAULT_REGEX_GENERATION_INSTRUCTIONS;
+    const instructions = settings.regexGenerationInstructions || DEFAULT_RULE_GENERATION_PROMPT;
     popupContent.innerHTML = `
         <small style="display:block; margin-bottom:5px;">
             This prompt generates replacement rules. Keep the JSON contract and semantic-safety requirements intact.
@@ -239,13 +207,13 @@ async function showRegexGenerationPromptEditor() {
     const textarea = popupContent.querySelector('#pp_regex_instructions_editor');
     textarea.value = instructions;
     popupContent.querySelector('#pp_reset_regex_instructions_btn').addEventListener('pointerup', () => {
-        textarea.value = DEFAULT_REGEX_GENERATION_INSTRUCTIONS;
+        textarea.value = DEFAULT_RULE_GENERATION_PROMPT;
         window.toastr.info('Instructions reset to default. Click "Save" to apply.');
     });
 
     if (await callGenericPopup(popupContent, POPUP_TYPE.CONFIRM, 'Edit Regex Generation Instructions', { wide: true, large: true })) {
         const newInstructions = textarea.value;
-        settings.regexGenerationInstructions = newInstructions.trim() === DEFAULT_REGEX_GENERATION_INSTRUCTIONS.trim()
+        settings.regexGenerationInstructions = newInstructions.trim() === DEFAULT_RULE_GENERATION_PROMPT.trim()
             ? ''
             : newInstructions;
         saveSettingsDebounced();
@@ -330,7 +298,12 @@ async function triggerDynamicRuleGenerationIfNeeded() {
         const getCandidateData = (lemmatizedKey) => {
             if (!lemmatizedKey) return null;
             const data = prosePolisherAnalyzer.ngramFrequencies.get(lemmatizedKey);
-            return data ? { candidate: data.original, enhanced_context: data.contextSentence } : null;
+            return data
+                ? {
+                    candidate: data.original,
+                    enhanced_context: (data.contexts || [data.contextSentence]).filter(Boolean),
+                }
+                : null;
         };
 
         const slopCandidateData = Array.from(prosePolisherAnalyzer.slopCandidates)
