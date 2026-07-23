@@ -373,19 +373,18 @@ export class Analyzer {
         };
     }
 
-    async callTwinsForSlopPreScreening(rawCandidates, compiledRegexes) {
-        if (!rawCandidates || rawCandidates.length === 0) return [];
+    async callTwinsForSlopPreScreening(candidates) {
+        if (!candidates || candidates.length === 0) return [];
 
-        // The large prompt is now imported and used directly
         const systemPrompt = prompts.callTwinsForSlopPreScreening;
-        const userPrompt = `Evaluate the following potential slop phrases/patterns:\n- ${rawCandidates.join('\n- ')}\n\nProvide the JSON array of evaluations now.`;
+        const userPrompt = `Evaluate these candidates using only their supplied real chat context:\n${JSON.stringify(candidates, null, 2)}\n\nProvide the JSON array of evaluations now.`;
 
         try {
             this.toastr.info("Prose Polisher: Reviewing slop candidates...", "Prose Polisher", { timeOut: 7000 });
             const rawResponse = await generateText(`${systemPrompt}\n\n${userPrompt}`);
             if (!rawResponse || !rawResponse.trim()) {
                 console.warn(`${LOG_PREFIX} Twins returned an empty response during pre-screening.`);
-                return rawCandidates.map(c => ({ candidate: c, enhanced_context: c })); 
+                return candidates;
             }
 
             let twinResults = [];
@@ -402,26 +401,26 @@ export class Analyzer {
             } catch (e) {
                 console.error(`${LOG_PREFIX} Failed to parse JSON from Twins' pre-screening response. Error: ${e.message}. Raw response:`, rawResponse);
                 this.toastr.error("Prose Polisher: Twins' pre-screening returned invalid data. See console.");
-                return rawCandidates.map(c => ({ candidate: c, enhanced_context: c })); 
+                return candidates;
             }
 
-            const validCandidates = twinResults.filter(r => r.valid_for_regex && r.candidate && r.enhanced_context).map(r => ({
-                candidate: r.candidate,
-                enhanced_context: r.enhanced_context,
-            }));
+            const sourceByCandidate = new Map(candidates.map(candidate => [candidate.candidate, candidate]));
+            const validCandidates = twinResults
+                .filter(result => result.valid_for_regex && sourceByCandidate.has(result.candidate))
+                .map(result => sourceByCandidate.get(result.candidate));
             
             const rejectedCount = twinResults.length - validCandidates.length;
             if (rejectedCount > 0) {
                  console.log(`${LOG_PREFIX} Twins rejected ${rejectedCount} slop candidates during pre-screening.`);
             }
 
-            this.toastr.success(`Prose Polisher reviewed ${rawCandidates.length} candidates. ${validCandidates.length} approved.`, "Prose Polisher", { timeOut: 4000 });
+            this.toastr.success(`Prose Polisher reviewed ${candidates.length} candidates. ${validCandidates.length} approved.`, "Prose Polisher", { timeOut: 4000 });
             return validCandidates;
 
         } catch (error) {
             console.error(`${LOG_PREFIX} Error during Twins pre-screening:`, error);
             this.toastr.error(`Candidate review failed: ${error.message}. Proceeding with raw candidates.`, "Prose Polisher");
-            return rawCandidates.map(c => ({ candidate: c, enhanced_context: c })); 
+            return candidates;
         }
     }
 
@@ -719,8 +718,7 @@ Output JSON with keys: "scriptName" (string), "findRegex" (string), "replaceStri
             console.log(`${LOG_PREFIX} [Manual Gen] Skip Triage is enabled. Using direct candidates.`);
             validCandidatesForGeneration = candidatesForPreScreening;
         } else {
-            const rawCandidatesForTwins = candidatesForPreScreening.map(c => c.candidate);
-            validCandidatesForGeneration = await this.callTwinsForSlopPreScreening(rawCandidatesForTwins);
+            validCandidatesForGeneration = await this.callTwinsForSlopPreScreening(candidatesForPreScreening);
         }
 
         const batchToProcess = validCandidatesForGeneration.slice(0, BATCH_SIZE);
