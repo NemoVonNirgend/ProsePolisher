@@ -18,6 +18,16 @@ export const EXTENSION_NAME = 'ProsePolisher';
 const LOG_PREFIX = `[${EXTENSION_NAME}]`;
 const EXTENSION_FOLDER_PATH = `scripts/extensions/third-party/${EXTENSION_NAME}`;
 const PROSE_POLISHER_ID_PREFIX = PROSE_POLISHER_RULE_PREFIX;
+const NON_PROSE_MESSAGE_TYPES = new Set([
+    'command',
+    'extension',
+    'function',
+    'image',
+    'image_generation',
+    'quiet',
+    'system',
+    'tool',
+]);
 
 // --- State Variables ---
 let staticRules = [];
@@ -221,50 +231,72 @@ async function showRegexGenerationPromptEditor() {
     }
 }
 
+function normalizeMessageType(message) {
+    const candidates = [
+        message?.extra?.generationType,
+        message?.extra?.generation_type,
+        message?.extra?.type,
+        message?.generationType,
+        message?.type,
+    ];
+    const type = candidates.find(value => typeof value === 'string' && value.trim());
+    return type?.trim().toLowerCase() ?? '';
+}
+
+function isNonProseAssistantMessage(message) {
+    if (!message || message.is_user || message.is_system) return true;
+
+    const messageType = normalizeMessageType(message);
+    if (NON_PROSE_MESSAGE_TYPES.has(messageType)) return true;
+    if (messageType.includes('image') || messageType.includes('tool') || messageType.includes('function')) return true;
+
+    const extra = message.extra ?? {};
+    if (extra.is_image || extra.image || extra.image_url || extra.tool_call || extra.tool_calls || extra.function_call) return true;
+
+    return false;
+}
+
+function prepareTextForAnalysis(rawText) {
+    if (typeof rawText !== 'string') return '';
+
+    return rawText
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<img\b[^>]*>/gi, ' ')
+        .replace(/!\[[^\]]*]\((?:[^)(]+|\([^)]*\))*\)/g, ' ')
+        .replace(/\[[^\]]*]\(data:image\/[^)]+\)/gi, ' ')
+        .replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function analyzeLatestAiMessage() {
-    if (!prosePolisherAnalyzer) {
-        return;
-    }
+    if (!prosePolisherAnalyzer) return;
 
-    // 1. Get all rendered message elements from the DOM.
-    const allMessageElements = document.querySelectorAll('#chat .mes');
-    if (allMessageElements.length < 2) {
-        // Not enough messages to have an AI response to a user message.
-        return;
-    }
+    const context = getContext();
+    const chat = context?.chat ?? [];
+    if (chat.length < 2) return;
 
-    // 2. The second-to-last element is the most recent AI response.
-    const lastAiMessageElement = allMessageElements[allMessageElements.length - 2];
+    // USER_MESSAGE_RENDERED fires after the new user message is appended, so the
+    // immediately preceding chat entry is the assistant reply we want to inspect.
+    const assistantIndex = chat.length - 2;
+    const assistantMessage = chat[assistantIndex];
+    if (isNonProseAssistantMessage(assistantMessage)) return;
 
-    // 3. Perform robust checks on the DOM element itself.
-    if (!lastAiMessageElement || lastAiMessageElement.getAttribute('is_user') === 'true') {
-        // This isn't an AI message, so we stop.
-        return;
-    }
+    const messageId = String(
+        assistantMessage.send_date
+        ?? assistantMessage.extra?.id
+        ?? assistantMessage.extra?.messageId
+        ?? assistantIndex,
+    );
+    if (processedMessageIds.has(messageId)) return;
 
-    // 4. Get the ID from the `mesid` attribute, which is reliable.
-    const messageId = lastAiMessageElement.getAttribute('mesid');
-    if (!messageId) {
-        // This is the true "lacks an ID" case.
-        console.warn(`${LOG_PREFIX} Last AI message element found, but it lacks a 'mesid' attribute. Skipping analysis.`);
-        return;
-    }
+    const messageText = prepareTextForAnalysis(assistantMessage.mes ?? '');
+    if (!messageText) return;
 
-    // 5. Check if we've already processed this ID.
-    if (processedMessageIds.has(messageId)) {
-        return;
-    }
-
-    // 6. Get the text to analyze.
-    const messageTextElement = lastAiMessageElement.querySelector('.mes_text');
-    if (!messageTextElement || !messageTextElement.textContent.trim()) {
-        // No text content to analyze.
-        return;
-    }
-    const messageText = messageTextElement.textContent;
-
-    // --- All checks passed, proceed with analysis ---
-    console.log(`${LOG_PREFIX} Analyzing previous AI message (ID: ${messageId}).`);
+    console.log(`${LOG_PREFIX} Analyzing raw assistant prose (ID: ${messageId}).`);
     processedMessageIds.add(messageId);
 
     prosePolisherAnalyzer.incrementProcessedMessages();
