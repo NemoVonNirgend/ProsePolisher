@@ -1,9 +1,17 @@
+import { saveSettingsDebounced } from '../../../../script.js';
+import { extension_settings } from '../../../extensions.js';
 import {
     normalizeRule,
     parseAlternatives,
     previewRule,
     validateRule,
 } from './rule-utils.js';
+import {
+    applyStaticRuleStates,
+    updateStaticRuleState,
+} from './static-rule-state.js';
+
+const EXTENSION_NAME = 'ProsePolisher';
 
 export class RuleNavigator {
     constructor({
@@ -30,6 +38,24 @@ export class RuleNavigator {
         this.updateGlobalRegex = updateGlobalRegex;
         this.showReloadPrompt = showReloadPrompt;
         this.ruleIdPrefix = ruleIdPrefix;
+
+        this.applyStoredStaticRuleStates();
+    }
+
+    getExtensionSettings() {
+        extension_settings[EXTENSION_NAME] ||= {};
+        return extension_settings[EXTENSION_NAME];
+    }
+
+    applyStoredStaticRuleStates() {
+        const settings = this.getExtensionSettings();
+        applyStaticRuleStates(this.getStaticRules(), settings.staticRuleStates);
+    }
+
+    persistStaticRuleState(rule) {
+        const settings = this.getExtensionSettings();
+        settings.staticRuleStates = updateStaticRuleState(settings.staticRuleStates, rule);
+        saveSettingsDebounced();
     }
 
     async open() {
@@ -156,6 +182,14 @@ export class RuleNavigator {
             this.getStaticRules().find(rule => rule.id === ruleId);
     }
 
+    persistRuleState(rule) {
+        if (rule.isStatic) {
+            this.persistStaticRuleState(rule);
+        } else {
+            this.persistDynamicRules();
+        }
+    }
+
     async toggleRuleStatus(ruleId) {
         if (!this.isReady()) return;
         const rule = this.findRule(ruleId);
@@ -165,7 +199,7 @@ export class RuleNavigator {
         }
 
         rule.disabled = !rule.disabled;
-        if (!rule.isStatic) this.persistDynamicRules();
+        this.persistRuleState(rule);
         this.renderRuleList();
         await this.updateGlobalRegex();
         this.toastr.success(`Rule "${rule.scriptName}" ${rule.disabled ? 'disabled' : 'enabled'}.`);
@@ -297,7 +331,7 @@ export class RuleNavigator {
         }
 
         if (isNew) this.getDynamicRules().push(rule);
-        if (!rule.isStatic) this.persistDynamicRules();
+        this.persistRuleState(rule);
         this.renderRuleList();
         await this.updateGlobalRegex();
         this.toastr.success(isNew ? 'New rule created.' : 'Rule updated.');
