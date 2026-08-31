@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
     PROSE_POLISHER_RULE_PREFIX,
     buildGlobalRegexRule,
+    isProsePolisherGlobalRegexRule,
+    removeProsePolisherGlobalRegexRules,
     syncGlobalRegexRules,
 } from '../global-regex.js';
 
@@ -16,6 +18,7 @@ test('global rules use modern random macro serialization', () => {
 
     assert.equal(globalRule.replaceString, '{{random::Well, hello.::Hello again.}}');
     assert.equal(globalRule.id, `${PROSE_POLISHER_RULE_PREFIX}dynamic-1`);
+    assert.deepEqual(globalRule.placement, [2]);
 });
 
 test('synchronization preserves unrelated rules and replaces old Prose Polisher rules', () => {
@@ -62,6 +65,31 @@ test('disabling integration removes only Prose Polisher rules', () => {
     assert.deepEqual(result, [{ id: 'unrelated' }]);
 });
 
+test('ownership detection catches current IDs and legacy display-name-only rules', () => {
+    assert.equal(
+        isProsePolisherGlobalRegexRule({ id: `${PROSE_POLISHER_RULE_PREFIX}owned` }),
+        true,
+    );
+    assert.equal(isProsePolisherGlobalRegexRule({ scriptName: '(PP) Legacy' }), true);
+    assert.equal(isProsePolisherGlobalRegexRule({ scriptName: '(PP)' }), true);
+    assert.equal(isProsePolisherGlobalRegexRule({ scriptName: '(PPP) Unrelated' }), false);
+    assert.equal(isProsePolisherGlobalRegexRule({ id: 'other', scriptName: 'Keep Me' }), false);
+});
+
+test('cleanup removes current and legacy owned rules without mutating the source array', () => {
+    const source = [
+        { id: 'unrelated', scriptName: 'Keep Me' },
+        { id: `${PROSE_POLISHER_RULE_PREFIX}current`, scriptName: '(PP) Current' },
+        { id: 'legacy-without-owned-id', scriptName: '(PP) Legacy' },
+    ];
+    const before = structuredClone(source);
+
+    const result = removeProsePolisherGlobalRegexRules(source);
+
+    assert.deepEqual(result, [{ id: 'unrelated', scriptName: 'Keep Me' }]);
+    assert.deepEqual(source, before);
+});
+
 test('global rule construction uses stable fallbacks without mutating source rules', () => {
     const source = {
         scriptName: 'Slow Nod',
@@ -78,14 +106,7 @@ test('global rule construction uses stable fallbacks without mutating source rul
     assert.deepEqual(source, before);
 });
 
-test('synchronization accepts a missing global rule array', () => {
-    const result = syncGlobalRegexRules(undefined, [{
-        id: 'new',
-        scriptName: 'New',
-        findRegex: 'old',
-        alternatives: ['new'],
-    }], true);
-
-    assert.equal(result.length, 1);
-    assert.equal(result[0].id, `${PROSE_POLISHER_RULE_PREFIX}new`);
+test('synchronization accepts missing rule arrays', () => {
+    const result = syncGlobalRegexRules(undefined, undefined, true);
+    assert.deepEqual(result, []);
 });
