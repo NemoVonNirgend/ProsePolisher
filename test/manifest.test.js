@@ -27,3 +27,11 @@ test('every declared lifecycle hook is exported by the entry point', () => {
         );
     }
 });
+
+test('entry point self-starts only when the extension is active', () => {
+    assert.match(entrySource, /isProsePolisherExtensionDisabled/);
+    assert.match(
+        entrySource,
+        /if \(!isProsePolisherExtensionDisabled\(extension_settings\.disabledExtensions\)\)\s*\{\s*void init\(\);/,
+    );
+});

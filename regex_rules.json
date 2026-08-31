@@ -43,7 +43,7 @@
         "findRegex": "\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\s+eyes\\s+widened\\b",
         "alternatives": [
             "$1 eyes opened wider",
-            "$1 gaze widened",
+            "$1 eyes grew wider",
             "$1 eyes went wide"
         ],
         "disabled": true,
@@ -82,7 +82,7 @@
         "alternatives": [
             "$1 fists drew tight",
             "$1 hands closed into fists",
-            "$1 fingers curled into $1 palms"
+            "$1 hands balled into fists"
         ],
         "disabled": true,
         "isStatic": true,
@@ -158,7 +158,7 @@
         "alternatives": [
             "$1 squeezed the bridge of $2 nose",
             "$1 pressed at the bridge of $2 nose",
-            "$1 held the bridge of $2 nose between $2 fingers"
+            "$1 pressed the bridge of $2 nose between $2 fingers"
         ],
         "disabled": true,
         "isStatic": true,
@@ -176,13 +176,13 @@
         "findRegex": "\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\s+voice\\s+(?:dropped|lowered)\\b",
         "alternatives": [
             "$1 voice fell lower",
-            "$1 voice dropped in volume",
+            "$1 voice went lower",
             "$1 voice settled lower"
         ],
         "disabled": true,
         "isStatic": true,
         "risk": "medium",
-        "semanticInvariant": "The possessor's voice becomes lower or quieter; no secrecy, intimacy, emotion, or audience is inferred.",
+        "semanticInvariant": "The possessor's voice becomes lower without deciding whether pitch or volume changed; no secrecy, intimacy, emotion, or audience is inferred.",
         "testCases": [
             "His voice dropped when the others entered.",
             "Her voice lowered, though the words stayed clear.",
@@ -192,11 +192,11 @@
     {
         "id": "STATIC_SAFE_011",
         "scriptName": "Safe Pack - Lingering Silence",
-        "findRegex": "\\b([Tt]he\\s+)?silence\\s+(?:stretched|lengthened|dragged)\\b",
+        "findRegex": "\\b([Tt]he\\s+)?([Ss])ilence\\s+(?:stretched|lengthened|dragged)\\b",
         "alternatives": [
-            "$1silence continued",
-            "$1silence drew out",
-            "$1silence lingered"
+            "$1$2ilence continued",
+            "$1$2ilence drew out",
+            "$1$2ilence lingered"
         ],
         "disabled": true,
         "isStatic": true,
@@ -211,11 +211,11 @@
     {
         "id": "STATIC_SAFE_012",
         "scriptName": "Safe Pack - Palpable Tension",
-        "findRegex": "\\b([Tt]he\\s+)?tension\\s+(?:was|felt)\\s+(?:palpable|thick|heavy)\\b",
+        "findRegex": "\\b([Tt]he\\s+)?([Tt])ension\\s+(?:was|felt)\\s+(?:palpable|thick|heavy)\\b",
         "alternatives": [
-            "$1tension was plain",
-            "$1tension was impossible to miss",
-            "$1tension weighed on the moment"
+            "$1$2ension was evident",
+            "$1$2ension was noticeable",
+            "$1$2ension was perceptible"
         ],
         "disabled": true,
         "isStatic": true,

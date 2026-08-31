@@ -4,6 +4,7 @@ import { PROSE_POLISHER_RULE_PREFIX } from '../global-regex.js';
 import {
     PROSE_POLISHER_EXTENSION_NAME,
     cleanupProsePolisherState,
+    isProsePolisherExtensionDisabled,
 } from '../lifecycle.js';
 
 test('disable/delete cleanup removes only owned global regex rules', () => {
@@ -79,4 +80,14 @@ test('cleanup safely ignores an invalid settings root', () => {
         removedRuleCount: 0,
         removedExtensionSettings: false,
     });
+});
+
+test('disabled extension detection accepts SillyTavern full and legacy short names', () => {
+    assert.equal(
+        isProsePolisherExtensionDisabled(['third-party/ProsePolisher']),
+        true,
+    );
+    assert.equal(isProsePolisherExtensionDisabled(['ProsePolisher']), true);
+    assert.equal(isProsePolisherExtensionDisabled(['third-party/Other']), false);
+    assert.equal(isProsePolisherExtensionDisabled(null), false);
 });

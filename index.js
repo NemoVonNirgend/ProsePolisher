@@ -1,6 +1,9 @@
 import { saveSettings } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
-import { cleanupProsePolisherState } from './lifecycle.js';
+import {
+    cleanupProsePolisherState,
+    isProsePolisherExtensionDisabled,
+} from './lifecycle.js';
 
 const LOG_PREFIX = '[ProsePolisher]';
 let activationPromise = null;
@@ -37,4 +40,11 @@ export async function onDelete() {
 
 export async function onClean() {
     await persistCleanup({ removeExtensionSettings: true });
+}
+
+// Current SillyTavern calls init through the manifest activate hook. Older
+// clients still load the manifest JS entry directly, so self-start only when
+// this extension is active. A disabled extension imported for deletion remains inert.
+if (!isProsePolisherExtensionDisabled(extension_settings.disabledExtensions)) {
+    void init();
 }

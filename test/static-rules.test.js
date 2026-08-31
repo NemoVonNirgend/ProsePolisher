@@ -61,6 +61,14 @@ test('every bundled test case matches and every alternative substitutes cleanly'
                     /\$(?:\d{1,2}|&)/,
                     `${rule.id} left a capture token: ${alternative}`,
                 );
+
+                if (/^[A-Z]/.test(testCase)) {
+                    assert.match(
+                        result,
+                        /^[A-Z]/,
+                        `${rule.id} lost sentence-initial capitalization: ${alternative}`,
+                    );
+                }
             }
         }
     }
