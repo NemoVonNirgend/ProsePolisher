@@ -115,21 +115,21 @@
     },
     {
         "id": "STATIC_SAFE_007",
-        "scriptName": "Safe Pack - Lower-Lip Bite",
-        "findRegex": "\\b([Hh]e|[Ss]he|[Tt]hey|[Ii]|[Yy]ou)\\s+(?:bit|caught)\\s+([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\s+lower\\s+lip\\b",
+        "scriptName": "Safe Pack - Shoulders Sagging",
+        "findRegex": "\\b([Hh]is|[Hh]er|[Tt]heir|[Mm]y|[Yy]our)\\s+shoulders\\s+sagged\\b",
         "alternatives": [
-            "$1 bit down on $2 lower lip",
-            "$1 caught $2 lower lip between $2 teeth",
-            "$1 pressed $2 teeth into $2 lower lip"
+            "$1 shoulders drooped",
+            "$1 shoulders fell lower",
+            "$1 shoulders settled lower"
         ],
         "disabled": true,
         "isStatic": true,
         "risk": "low",
-        "semanticInvariant": "The same subject bites the same lower lip; no emotion, force, injury, or reason is inferred.",
+        "semanticInvariant": "The possessor's shoulders move or rest lower; no emotion, fatigue, defeat, cause, or intention is inferred.",
         "testCases": [
-            "She bit her lower lip while reading.",
-            "He caught his lower lip between his teeth.",
-            "I bit my lower lip, then erased the line."
+            "Her shoulders sagged when the door closed.",
+            "His shoulders sagged, though he remained standing.",
+            "Their shoulders sagged beneath the coat."
         ]
     },
     {
@@ -158,12 +158,12 @@
         "alternatives": [
             "$1 squeezed the bridge of $2 nose",
             "$1 pressed at the bridge of $2 nose",
-            "$1 pressed the bridge of $2 nose between $2 fingers"
+            "$1 applied pressure to the bridge of $2 nose"
         ],
         "disabled": true,
         "isStatic": true,
         "risk": "low",
-        "semanticInvariant": "The same subject presses the bridge of the same nose; no frustration, fatigue, pain, or motive is inferred.",
+        "semanticInvariant": "The same subject presses the bridge of the same nose; no frustration, fatigue, pain, motive, or ownership of the hand is inferred.",
         "testCases": [
             "He pinched the bridge of his nose.",
             "She pinched at the bridge of her nose before replying.",
