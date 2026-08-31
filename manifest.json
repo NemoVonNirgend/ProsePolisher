@@ -1,12 +1,18 @@
 {
     "display_name": "Prose Polisher (Regex + AI)",
     "author": "@NemoVonNirgend & OBAMA_JOE_KENEDY",
-    "version": "6.0.0",
+    "version": "6.1.0",
     "description": "Analyze repetitive prose, review correction candidates, and manage safe writing-quality rules.",
     "requires": [],
     "optional": [],
-    "js": "content.js",
+    "js": "index.js",
     "css": "styles.css",
     "homePage": "https://github.com/NemoVonNirgend/ProsePolisher",
-    "loading_order": 1000
+    "loading_order": 1000,
+    "hooks": {
+        "activate": "init",
+        "disable": "onDisable",
+        "clean": "onClean",
+        "delete": "onDelete"
+    }
 }

@@ -7,6 +7,7 @@ test('settings normalization fills Prose Polisher defaults', () => {
 
     assert.equal(settings.isStaticEnabled, true);
     assert.equal(settings.dynamicTriggerCount, 30);
+    assert.deepEqual(settings.staticRuleStates, {});
     assert.deepEqual(settings.blacklist, DEFAULT_SETTINGS.blacklist);
 });
 
@@ -17,6 +18,7 @@ test('settings normalization preserves user values and legacy migration data', (
         dynamicRules,
         gremlinWriterModel: 'custom-model',
         gremlinWriterChaosOptions: [{ id: 'legacy-option' }],
+        staticRuleStates: { STATIC_SAFE_001: false },
         blacklist: { custom: 7 },
     });
 
@@ -24,6 +26,7 @@ test('settings normalization preserves user values and legacy migration data', (
     assert.equal(settings.dynamicRules, dynamicRules);
     assert.equal(settings.gremlinWriterModel, 'custom-model');
     assert.deepEqual(settings.gremlinWriterChaosOptions, [{ id: 'legacy-option' }]);
+    assert.deepEqual(settings.staticRuleStates, { STATIC_SAFE_001: false });
     assert.equal(settings.blacklist.custom, 7);
     assert.equal(settings.blacklist.ozone, 3);
 });
@@ -44,4 +47,16 @@ test('normalized blacklists do not mutate shared defaults', () => {
     first.blacklist.ozone = 99;
     assert.equal(second.blacklist.ozone, 3);
     assert.equal(DEFAULT_SETTINGS.blacklist.ozone, 3);
+});
+
+test('normalized static rule states do not mutate shared defaults or source objects', () => {
+    const stored = { STATIC_SAFE_001: false };
+    const first = normalizeSettings({ staticRuleStates: stored });
+    const second = normalizeSettings({});
+
+    first.staticRuleStates.STATIC_SAFE_002 = true;
+
+    assert.deepEqual(stored, { STATIC_SAFE_001: false });
+    assert.deepEqual(second.staticRuleStates, {});
+    assert.deepEqual(DEFAULT_SETTINGS.staticRuleStates, {});
 });

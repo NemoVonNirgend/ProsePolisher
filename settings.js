@@ -6,6 +6,7 @@ export const DEFAULT_SETTINGS = {
     regexGenerationInstructions: '',
     skipTriageCheck: false,
     autoActivateGeneratedRules: false,
+    staticRuleStates: {},
     slopThreshold: 5,
     leaderboardUpdateCycle: 10,
     pruningCycle: 20,
@@ -30,10 +31,18 @@ export function normalizeSettings(existingSettings = {}) {
         !Array.isArray(safeSettings.blacklist)
         ? safeSettings.blacklist
         : {};
+    const existingStaticRuleStates = safeSettings.staticRuleStates &&
+        typeof safeSettings.staticRuleStates === 'object' &&
+        !Array.isArray(safeSettings.staticRuleStates)
+        ? safeSettings.staticRuleStates
+        : {};
 
     return {
         ...DEFAULT_SETTINGS,
         ...safeSettings,
+        staticRuleStates: {
+            ...existingStaticRuleStates,
+        },
         blacklist: {
             ...DEFAULT_SETTINGS.blacklist,
             ...existingBlacklist,
